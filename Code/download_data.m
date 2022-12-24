@@ -1,7 +1,7 @@
 % Download MBH98 reconstruction.
-mkdir "../Data/Reconstruction";
-if ~exist("../Data/Reconstruction/nhmean.dat")
-  [~, success, msg] = urlwrite("http://www.meteo.psu.edu/holocene/public_html/shared/research/MANNETAL98/nhmean.dat", "../Data/Reconstruction/nhmean.dat");
+mkdir "../Data/Original reconstruction";
+if ~exist("../Data/Original reconstruction/nhmean.dat")
+  [~, success, msg] = urlwrite("http://www.meteo.psu.edu/holocene/public_html/shared/research/MANNETAL98/nhmean.dat", "../Data/Original reconstruction/nhmean.dat");
   if ~success
     error(msg);
   endif
