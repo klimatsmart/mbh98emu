@@ -1,11 +1,12 @@
 % Fill in the columns of X by linear interpolation.
-function Y = infill_matrix(X)
+
+function Y = fill_in_matrix(X)
   Y = single(X);
   Y(X == -9999) = nan;
   Y /= 100;
   n = size(Y, 1);
   for i = 1 : size(Y, 2)
-    % Extrapolate backwards.
+    % Extrapolate backwards with a constant.
     idx = find(~isnan(Y(:, i)), 1);
     Y(1 : idx - 1, i) = Y(idx, i);
     

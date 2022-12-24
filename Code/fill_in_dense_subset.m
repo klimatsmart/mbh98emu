@@ -1,3 +1,6 @@
+% This script fills in missing data in the dense subset of the instrumental
+% record and saves the data as binary.
+
 % Time parameters.
 start_instr = 1854;
 end_instr = 1993;
@@ -46,7 +49,7 @@ T_raw = T_raw(:, idx_dense);
 T_raw(T_raw < -999 & T_raw ~= -9999) *= -1;
 
 % Fill in missing data.
-T = infill_matrix(T_raw);
+T = fill_in_matrix(T_raw);
 
 % Round to two decimal places.
 for i = 1 : size(T, 1)
@@ -57,7 +60,7 @@ for i = 1 : size(T, 1)
   endfor
 endfor
 
-% Multiply by 100 and round to nearest integer.
+% Convert back to hundredths of a degree.
 T = round(100 * T);
 
 % Save infilled temperature data as binary.

@@ -1,3 +1,6 @@
+% This script fills in missing data in the sparse subset of the instrumental record
+% and saves the data as binary.
+
 % Time parameters.
 start_instr = 1854;
 end_instr = 1993;
@@ -44,7 +47,7 @@ endfor
 T_raw = T_raw(:, idx_sparse);
 
 % Fill in missing data.
-T_monthly = infill_matrix(T_raw);
+T_monthly = fill_in_matrix(T_raw);
 
 % Calculate annual averages.
 T = zeros(size(T_monthly, 1) / 12, size(T_monthly, 2), "single");
@@ -62,7 +65,7 @@ for i = 1 : size(T, 1)
   endfor
 endfor
 
-% Multiply by 100 and round to nearest integer.
+% Convert back to hundredths of a degree.
 T = round(100 * T);
 
 % Save infilled temperature data as binary.

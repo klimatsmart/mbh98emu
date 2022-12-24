@@ -1,3 +1,10 @@
+% This script reads the file anomalies-new and saves the data as binary.
+
+% Skip if already done.
+if exist("../Data/Instrumental/anomalies_all.bin")
+  return
+endif
+
 % Start and end of instrumental record.
 start_instr = 1854;
 end_instr = 1993;

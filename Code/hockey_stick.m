@@ -1,3 +1,6 @@
+% This script performs the regression analysis on the proxy and instrumental data,
+% and calculates cross-validation statistics for the temperature reconstruction.
+
 % Reconstruction steps.
 start_step = [1400, 1450, 1500, 1600, 1650, 1700, 1730, 1750, 1760, 1780, 1800, 1820];
 end_step = [start_step(2 : end) - 1, 1980];
@@ -23,8 +26,8 @@ length_ver = end_ver - start_ver + 1;
 % Useful time indices.
 idx_cal_monthly = 12 * (start_cal - start_instr) + 1 : 12 * (end_cal - start_instr + 1);       % 1902–1980
 idx_cal_end_monthly = 12 * (start_cal - start_instr) + 1 : 12 * (end_instr - start_instr + 1); % 1902–1993
-idx_cal = (start_cal - start_instr) + 1 : end_cal - start_instr + 1;                           % 1902–1980
-idx_ver = (start_ver - start_instr) + 1 : end_ver - start_instr + 1;                           % 1854–1901
+idx_cal = start_cal - start_instr + 1 : end_cal - start_instr + 1;                             % 1902–1980
+idx_ver = start_ver - start_instr + 1 : end_ver - start_instr + 1;                             % 1854–1901
 
 % Load dense temperature data.
 idx_dense = importdata("../Data/Instrumental/idx_dense.txt");
@@ -46,7 +49,7 @@ T_sparse = fread(fid, [year_count, numel(idx_sparse)], "int16");
 T_sparse = single(T_sparse);
 fclose(fid);
 
-% Divide by 100 to convert to degrees.
+% Convert to degrees.
 T_dense_monthly /= 100;
 T_sparse        /= 100;
 
@@ -56,11 +59,17 @@ for i = 1 : numel(idx_sparse)
   idx_sparse_subset_of_dense(i) = find(idx_dense == idx_sparse(i), 1);
 endfor
 
-% Latitudes of grid cell centers.
+% Coordinates of grid cell centers.
 grid_size = single(5);
-lat_count = 180 / grid_size;
 lon_count = 360 / grid_size;
-lat = repmat(linspace(90 - 0.5 * grid_size, -90 + 0.5 * grid_size, lat_count), 1, lon_count)';
+lat_count = 180 / grid_size;
+lon = linspace(0.5 * grid_size, 360 - 0.5 * grid_size, lon_count);
+lon(lon > 180) -= 360;
+lat = linspace(90 - 0.5 * grid_size, -90 + 0.5 * grid_size, lat_count);
+[lon, lat] = meshgrid(lon, lat);
+lon = reshape(lon, [], 1);
+lat = reshape(lat, [], 1);
+lon_dense  = lon(idx_dense);
 lat_dense  = lat(idx_dense);
 lat_sparse = lat(idx_sparse);
 
@@ -73,8 +82,8 @@ T_dense_monthly = T_dense_monthly - mu_dense;
 T_sparse        = T_sparse - mu_dense(idx_sparse_subset_of_dense);
 
 % Compute singular value decomposition.
-T_dense_monthly_normalized = T_dense_monthly ./ sigma_dense;
-[U_monthly, S, V] = svd(T_dense_monthly_normalized(idx_cal_end_monthly, :) .* cosd(lat_dense)');
+T_dense_monthly_standardized = T_dense_monthly ./ sigma_dense;
+[U_monthly, S, V] = svd(T_dense_monthly_standardized(idx_cal_end_monthly, :) .* cosd(lat_dense)');
 
 % Calculate annual averages of the left singular vectors.
 U = zeros(size(U_monthly, 1) / 12, size(U_monthly, 2), "single");
@@ -92,11 +101,32 @@ endfor
 T_dense_cal = T_dense(idx_cal, :);
 T_sparse_ver = T_sparse(idx_ver, :);
 
+% Calculate global mean temperature based on dense subset.
+w_glob_dense = cosd(lat_dense);
+w_glob_dense /= sum(w_glob_dense);
+T_glob_dense = T_dense * w_glob_dense;
+T_glob_dense_cal = T_glob_dense(idx_cal);
+
 % Calculate Northern Hemisphere mean temperature based on dense subset.
 w_nhem_dense = cosd(lat_dense) .* (lat_dense > 0);
 w_nhem_dense /= sum(w_nhem_dense);
 T_nhem_dense = T_dense * w_nhem_dense;
 T_nhem_dense_cal = T_nhem_dense(idx_cal);
+
+% Calculate detrended Northern Hemisphere mean temperature based on dense subset.
+T_detr_dense_cal = detrend(T_nhem_dense_cal);
+
+% Calculate Nino mean temperature based on dense subset.
+w_nino_dense = cosd(lat_dense) .* (lat_dense > -5 & lat_dense < 5 & lon_dense > -150 & lon_dense < -90);
+w_nino_dense /= sum(w_nino_dense);
+T_nino_dense = T_dense * w_nino_dense;
+T_nino_dense_cal = T_nino_dense(idx_cal);
+
+% Calculate global mean temperature based on sparse subset.
+w_glob_sparse = cosd(lat_sparse);
+w_glob_sparse /= sum(w_glob_sparse);
+T_glob_sparse = T_sparse * w_glob_sparse;
+T_glob_sparse_ver = T_glob_sparse(idx_ver);
 
 % Calculate Northern Hemisphere mean temperature based on sparse subset.
 w_nhem_sparse = cosd(lat_sparse) .* (lat_sparse > 0);
@@ -104,16 +134,64 @@ w_nhem_sparse /= sum(w_nhem_sparse);
 T_nhem_sparse = T_sparse * w_nhem_sparse;
 T_nhem_sparse_ver = T_nhem_sparse(idx_ver);
 
+% Calculate RE statistics for eigenvector-filtered instrumental data.
+group = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'};
+EOFLIST = {
+[1 : 40],
+[1 : 20],
+[1, 2, 3, 4, 5, 7, 9, 11, 14, 15, 16],
+[1, 2, 3, 4, 5, 7, 9, 11, 15],
+[1, 2, 3, 5, 6, 8, 11, 15],
+[1 : 5],
+[1, 2, 5, 11, 15],
+[1, 2, 11, 15],
+[1, 2],
+1};
+RE_glob_filt_cal = nan(1, numel(group));
+RE_nhem_filt_cal = nan(1, numel(group));
+RE_detr_filt_cal = nan(1, numel(group));
+RE_nino_filt_cal = nan(1, numel(group));
+RE_mult_filt_cal = nan(1, numel(group));
+for i = 1 : numel(group)
+  % Filter gridded temperature.
+  T_dense_filt_standardized = U(:, EOFLIST{i}) * S(EOFLIST{i}, EOFLIST{i}) * V(:, EOFLIST{i})' ./ cosd(lat_dense)';
+  T_dense_filt = T_dense_filt_standardized .* sigma_dense;
+  
+  % Calculate average global and Northern Hemisphere filtered temperature.
+  T_glob_dense_filt = T_dense_filt * w_glob_dense;
+  T_nhem_dense_filt = T_dense_filt * w_nhem_dense;
+  T_nino_dense_filt = T_dense_filt * w_nino_dense;
+  
+  % Calibration and verification statistics.
+  T_glob_dense_filt_cal = T_glob_dense_filt(1 : length_cal);
+  T_nhem_dense_filt_cal = T_nhem_dense_filt(1 : length_cal);
+  T_detr_dense_filt_cal = detrend(T_nhem_dense_filt_cal);
+  T_nino_dense_filt_cal = T_nino_dense_filt(1 : length_cal);
+  T_dense_filt_cal = T_dense_filt(1 : length_cal, :);
+  RE_glob_filt_cal(i) = 1 - sumsq(T_glob_dense_cal - T_glob_dense_filt_cal) / sumsq(T_glob_dense_cal);
+  RE_nhem_filt_cal(i) = 1 - sumsq(T_nhem_dense_cal - T_nhem_dense_filt_cal) / sumsq(T_nhem_dense_cal);
+  RE_detr_filt_cal(i) = 1 - sumsq(T_detr_dense_cal - T_detr_dense_filt_cal) / sumsq(T_detr_dense_cal);
+  RE_nino_filt_cal(i) = 1 - sumsq(T_nino_dense_cal - T_nino_dense_filt_cal) / sumsq(T_nino_dense_cal);
+  RE_mult_filt_cal(i) = 1 - sum(cumsum((T_dense_cal - T_dense_filt_cal).^2)(:)) / sum(cumsum(T_dense_cal.^2)(:));
+endfor
+
 % Calculate temperature reconstruction for all time steps.
 t = [];
 T_nhem_recon = [];
+RE_glob_cal = nan(1, numel(start_step));
+RE_glob_ver = nan(1, numel(start_step));
 RE_nhem_cal = nan(1, numel(start_step));
 RE_nhem_ver = nan(1, numel(start_step));
+RE_detr_cal = nan(1, numel(start_step));
+RE_nino_cal = nan(1, numel(start_step));
+RE_mult_cal = nan(1, numel(start_step));
+RE_mult_ver = nan(1, numel(start_step));
 for i = 1 : numel(start_step)
   % Import proxy data.
   P = importdata(sprintf("../Data/Proxy/Data/data%d.txt", start_step(i)));
   t_step = P(:, 1);
   idx_cal_step = t_step >= start_cal & t_step <= end_cal;
+  idx_ver_step = t_step >= start_ver & t_step <= end_ver;
   P(:, 1) = [];
 
   % Extrapolate proxy data.
@@ -122,7 +200,7 @@ for i = 1 : numel(start_step)
     P(idx + 1 : end, j) = P(idx, j);
   endfor
 
-  % Normalize proxy data over calibration period.
+  % Standardize proxy data over calibration period.
   P -= mean(P(idx_cal_step, :), 1);
   P ./= std(detrend(P(idx_cal_step, :)), 1, 1);
   
@@ -137,38 +215,79 @@ for i = 1 : numel(start_step)
   U_recon = U_recon ./ std(U_recon(idx_cal_step, :), 1, 1) .* std(U(1 : length_cal, eoflist), 1, 1);
   
   % Reconstruct gridded temperature.
-  T_dense_recon_normalized = U_recon * S(eoflist, eoflist) * V(:, eoflist)' ./ cosd(lat_dense)';
-  T_dense_recon = T_dense_recon_normalized .* sigma_dense;
+  T_dense_recon_standardized = U_recon * S(eoflist, eoflist) * V(:, eoflist)' ./ cosd(lat_dense)';
+  T_dense_recon = T_dense_recon_standardized .* sigma_dense;
   T_sparse_recon = T_dense_recon(:, idx_sparse_subset_of_dense);
   
+  % Calculate average global reconstructed temperature.
+  T_glob_dense_recon = T_dense_recon * w_glob_dense;
+  T_glob_sparse_recon = T_sparse_recon * w_glob_sparse;
+
   % Calculate average Northern Hemisphere reconstructed temperature.
   T_nhem_dense_recon = T_dense_recon * w_nhem_dense;
   T_nhem_sparse_recon = T_sparse_recon * w_nhem_sparse;
   
+  % Calculate average nino reconstructed temperature.
+  T_nino_dense_recon = T_dense_recon * w_nino_dense;
+  
   % Calibration and verification statistics.
-  T_nhem_dense_recon_cal = T_nhem_dense_recon(t_step >= start_cal & t_step <= end_cal);
-  T_nhem_sparse_recon_ver = T_nhem_sparse_recon(t_step >= start_ver & t_step <= end_ver);
+  T_dense_recon_cal       = T_dense_recon(idx_cal_step, :);
+  T_sparse_recon_ver      = T_sparse_recon(idx_ver_step, :);
+  T_glob_dense_recon_cal  = T_glob_dense_recon(idx_cal_step);
+  T_glob_sparse_recon_ver = T_glob_sparse_recon(idx_ver_step);
+  T_nhem_dense_recon_cal  = T_nhem_dense_recon(idx_cal_step);
+  T_nhem_sparse_recon_ver = T_nhem_sparse_recon(idx_ver_step);
+  T_detr_dense_recon_cal  = detrend(T_nhem_dense_recon_cal);
+  T_nino_dense_recon_cal  = T_nino_dense_recon(idx_cal_step);
+  RE_glob_cal(i) = 1 - sumsq(T_glob_dense_cal - T_glob_dense_recon_cal) / sumsq(T_glob_dense_cal);
+  RE_glob_ver(i) = 1 - sumsq(T_glob_sparse_ver - T_glob_sparse_recon_ver) / sumsq(T_glob_sparse_ver);
   RE_nhem_cal(i) = 1 - sumsq(T_nhem_dense_cal - T_nhem_dense_recon_cal) / sumsq(T_nhem_dense_cal);
   RE_nhem_ver(i) = 1 - sumsq(T_nhem_sparse_ver - T_nhem_sparse_recon_ver) / sumsq(T_nhem_sparse_ver);
+  RE_detr_cal(i) = 1 - sumsq(T_detr_dense_cal - T_detr_dense_recon_cal) / sumsq(T_detr_dense_cal);
+  RE_nino_cal(i) = 1 - sumsq(T_nino_dense_cal - T_nino_dense_recon_cal) / sumsq(T_nino_dense_cal);
+  RE_mult_cal(i) = 1 - sum(cumsum((T_dense_cal - T_dense_recon_cal).^2)(:)) / sum(cumsum(T_dense_cal.^2)(:));
+  RE_mult_ver(i) = 1 - sum(cumsum((T_sparse_ver - T_sparse_recon_ver).^2)(:)) / sum(cumsum(T_sparse_ver.^2)(:));
   
   % Splice.
   t = [t; t_step(1 : length_step(i))];
   T_nhem_recon = [T_nhem_recon; T_nhem_dense_recon(1 : length_step(i))];
 endfor
 
-% Plot emulated and original reconstruction.
-nhem_MBH98 = importdata("../Data/Reconstruction/nhmean.dat", " ", 1).data;
-plot(t, T_nhem_recon, "r-*", nhem_MBH98(1 : length_recon, 1), nhem_MBH98(1 : length_recon, 2), "b-o");
-title("Northern Hemisphere temperature reconstruction");
-xlabel("Year");
-ylabel("Temperature anomaly (°C)\nwith respect to 1902–1980");
-legend({"Emulation", "MBH98"}, "location", "northwest");
-
-% Print cross-validation statistics.
-printf("\nCross-validation RE for Northern Hemisphere:\n\n");
-printf("Step    Cal   Ver\n");
-printf("------------------\n");
-for i = 1 : numel(start_step)
-  printf("%4d   %5.2f %5.2f\n", start_step(i), RE_nhem_cal(i), RE_nhem_ver(i));
+% Write reconstruction to file.
+mkdir "../Data/Emulation";
+[fid, msg] = fopen("../Data/Emulation/nhem_recon.txt", "w");
+if fid == -1
+  error(msg);
+endif
+fputs(fid, "Year   NH recon\n");
+for i = 1 : numel(t)
+  fprintf(fid, "%4d %11.7f", t(i), T_nhem_recon(i));
+  if i ~= numel(t)
+    fprintf(fid, "\n");
+  endif
 endfor
-printf("\n");
+fclose(fid);
+
+% Write cross-validation statistics to file.
+[fid, msg] = fopen("../Data/Emulation/cross_validation.txt", "w");
+if fid == -1
+  error(msg);
+endif
+fputs(fid, "Filtered instrumental data RE statistics:\n\n");
+fputs(fid, "Group  GLB   NH    DET   NIN   MULT\n");
+fputs(fid, "-----------------------------------\n");
+for i = 1 : numel(group)
+    fprintf(fid, "%c     %5.2f %5.2f %5.2f %5.2f %5.2f\n",
+            group{i}, RE_glob_filt_cal(i), RE_nhem_filt_cal(i),
+                      RE_detr_filt_cal(i), RE_nino_filt_cal(i), RE_mult_filt_cal(i));
+endfor
+fputs(fid, "\nReconstruction RE statistics:\n\n");
+fputs(fid, "       Calibration                    Verification\n");
+fputs(fid, "Step   GLB   NH    DET   NIN   MLT    GLB   NH    MLTA\n"); 
+fputs(fid, "------------------------------------------------------\n");
+for i = numel(start_step) : -1 : 1
+  fprintf(fid, "%4d  %5.2f %5.2f %5.2f %5.2f %5.2f  %5.2f %5.2f %5.2f\n",
+          start_step(i), RE_glob_cal(i), RE_nhem_cal(i), RE_detr_cal(i), RE_nino_cal(i),
+                         RE_mult_cal(i), RE_glob_ver(i), RE_nhem_ver(i), RE_mult_ver(i));
+endfor
+fclose(fid);
