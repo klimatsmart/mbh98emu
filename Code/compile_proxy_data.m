@@ -1,3 +1,5 @@
+% This script extracts all necessary proxy data from the mbh98.tar archive.
+
 % Make directory for data files.
 mkdir "../Data/Proxy/Data";
 
