@@ -102,13 +102,13 @@ T_dense_cal = T_dense(idx_cal, :);
 T_sparse_ver = T_sparse(idx_ver, :);
 
 % Calculate global mean temperature based on dense subset.
-w_glob_dense = single(cosd(lat_dense));
+w_glob_dense = cosd(lat_dense);
 w_glob_dense /= sum(w_glob_dense);
 T_glob_dense = T_dense * w_glob_dense;
 T_glob_dense_cal = T_glob_dense(idx_cal);
 
 % Calculate Northern Hemisphere mean temperature based on dense subset.
-w_nhem_dense = single(cosd(lat_dense)) .* (lat_dense > 0);
+w_nhem_dense = cosd(lat_dense) .* (lat_dense > 0);
 w_nhem_dense /= sum(w_nhem_dense);
 T_nhem_dense = T_dense * w_nhem_dense;
 T_nhem_dense_cal = T_nhem_dense(idx_cal);
@@ -154,7 +154,7 @@ RE_nino_filt_cal = nan(1, numel(group));
 RE_mult_filt_cal = nan(1, numel(group));
 for i = 1 : numel(group)
   % Filter gridded temperature.
-  T_dense_filt_standardized = U(:, EOFLIST{i}) * S(EOFLIST{i}, EOFLIST{i}) * V(:, EOFLIST{i})' ./ single(cosd(lat_dense))';
+  T_dense_filt_standardized = U(:, EOFLIST{i}) * S(EOFLIST{i}, EOFLIST{i}) * V(:, EOFLIST{i})' ./ cosd(lat_dense)';
   T_dense_filt = T_dense_filt_standardized .* sigma_dense;
   
   % Calculate average global and Northern Hemisphere filtered temperature.
