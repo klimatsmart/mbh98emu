@@ -161,11 +161,11 @@ def sparse_subset():
 
 def prepare_dense_subset():
     df = dense_subset()
-    invert_anomalies_below_minus_10(df)
     convert_to_degrees(df)
+    invert_anomalies_below_minus_10(df)
     fill_in_instrumental_data(df)
-    df = df.loc[str(CAL_START):]
     round_to_2_decimal_places(df)
+    df = df.loc[str(CAL_START):]
     path = INSTRUMENTAL_PATH.joinpath("dense_subset_monthly.pkl")
     df.to_pickle(path)
 
@@ -255,7 +255,7 @@ def column_mean32(a):
 def invert_anomalies_below_minus_10(df):
     # This function emulates a programming error.
     t = df.to_numpy()
-    t[(t < -999) & (t != -9999)] *= -1
+    t[t <= -10] *= -1
 
 
 def convert_to_degrees(df):
@@ -369,8 +369,8 @@ def prepare_proxy_data():
     tar_path = DOWNLOAD_PATH.joinpath("mbh98.tar")
     untar_path = PROXY_PATH.joinpath("mbh98")
     untar(tar_path, untar_path)
-    lists_path = PROXY_PATH.joinpath("networks", "lists")
-    data_path = PROXY_PATH.joinpath("networks", "data")
+    lists_path = CONFIG_PATH.joinpath("proxy")
+    data_path = PROXY_PATH.joinpath("networks")
     data_path.mkdir(exist_ok=True)
     datalists = [d for d in lists_path.iterdir() if d.is_file()]
     for datalist in datalists:
@@ -471,7 +471,7 @@ def reconstructed_temperature_field(step):
 def reconstructed_svd(step):
     # Load proxy matrix.
     filename = f"data{step:04d}.txt"
-    proxy_path = PROXY_PATH.joinpath("networks", "data", filename)
+    proxy_path = PROXY_PATH.joinpath("networks", filename)
     p = np.genfromtxt(proxy_path)
     fill_in_proxy_matrix(p)
     standardize_proxy_matrix(p, CAL_START, CAL_END)
@@ -480,7 +480,7 @@ def reconstructed_svd(step):
     
     # Load instrumental PC retention.
     filename = f"eoflist{step:04d}.txt"
-    eofs_path = CONFIG_PATH.joinpath("eofs", filename)
+    eofs_path = CONFIG_PATH.joinpath("instrumental", filename)
     with open(eofs_path, "r", newline="") as f:
         reader = csv.reader(f)
         eofs = next(reader)
