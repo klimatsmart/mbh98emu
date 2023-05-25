@@ -252,17 +252,16 @@ def column_mean32(a):
     return mu
 
 
+def convert_to_degrees(df):
+    t = df.to_numpy()
+    t[t == -9999] = np.nan
+    t /= 100
+
+
 def invert_anomalies_below_minus_10(df):
     # This function emulates a programming error.
     t = df.to_numpy()
     t[t <= -10] *= -1
-
-
-def convert_to_degrees(df):
-    t = df.to_numpy()
-    index = t != -9999
-    t[index] /= 100
-    t[~index] = np.nan
 
 
 def round_to_2_decimal_places(df):
