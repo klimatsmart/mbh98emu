@@ -30,8 +30,8 @@ VALIDATION_PATH = ROOT_PATH.joinpath("validation")
 for path in [RECONSTRUCTION_PATH, VALIDATION_PATH]:
     if path.is_dir():
         shutil.rmtree(path)
-for path in [DOWNLOAD_PATH, INSTRUMENTAL_PATH, RECONSTRUCTION_PATH,
-             VALIDATION_PATH]:
+for path in [DOWNLOAD_PATH, INSTRUMENTAL_PATH, PROXY_PATH,
+             RECONSTRUCTION_PATH, VALIDATION_PATH]:
     path.mkdir(exist_ok=True)
 
 # Instrumental, calibration and verification periods.
@@ -365,18 +365,14 @@ def compute_instrumental_svd():
 
 def prepare_proxy_data():
     print("Preparing proxy data...")
+    extract_proxy_archive()
+    create_proxy_matrices()
+
+
+def extract_proxy_archive():
     tar_path = DOWNLOAD_PATH.joinpath("mbh98.tar")
     untar_path = PROXY_PATH.joinpath("mbh98")
     untar(tar_path, untar_path)
-    lists_path = CONFIG_PATH.joinpath("proxy")
-    data_path = PROXY_PATH.joinpath("networks")
-    data_path.mkdir(exist_ok=True)
-    datalists = [d for d in lists_path.iterdir() if d.is_file()]
-    for datalist in datalists:
-        proxy = proxy_matrix(datalist)
-        filename = datalist.name.replace("list", "")
-        file_path = data_path.joinpath(filename)
-        save_proxy_matrix(proxy, file_path)
 
 
 def untar(tar, path):
@@ -385,12 +381,23 @@ def untar(tar, path):
             f.extractall(path)
 
 
-def proxy_matrix(datalist):
+def create_proxy_matrices():
+    lists_path = CONFIG_PATH.joinpath("proxy")
+    data_path = PROXY_PATH.joinpath("networks")
+    data_path.mkdir(exist_ok=True)
+    for step in reconstruction_steps():
+        datalist_path = lists_path.joinpath(f"datalist{step:04d}.txt")
+        proxy = proxy_matrix(datalist_path)
+        file_path = data_path.joinpath(f"data{step:04d}.txt")
+        save_proxy_matrix(proxy, file_path)
+
+
+def proxy_matrix(datalist_path):
     # Create a proxy data matrix with time in the first column.
     mbh98_path = PROXY_PATH.joinpath("mbh98")
-    with open(datalist, "r") as f:
+    with open(datalist_path, "r") as f:
         relative_paths = f.read().splitlines()
-    year = int(datalist.stem.strip("datalist"))
+    year = int(datalist_path.stem.strip("datalist"))
     n = CAL_END - year + 1
     m = len(relative_paths) + 1
     proxy = np.full((n, m), np.nan)
