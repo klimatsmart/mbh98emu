@@ -1,4 +1,4 @@
-Reconstruction steps are listed in steps.txt.
+Reconstruction steps are listed in steps.csv.
 
 Proxy networks are listed in proxy/.
 

@@ -386,9 +386,9 @@ def create_proxy_matrices():
     data_path = PROXY_PATH.joinpath("networks")
     data_path.mkdir(exist_ok=True)
     for step in reconstruction_steps():
-        datalist_path = lists_path.joinpath(f"datalist{step:04d}.txt")
+        datalist_path = lists_path.joinpath(f"datalist{step:04d}.dat")
         proxy = proxy_matrix(datalist_path)
-        file_path = data_path.joinpath(f"data{step:04d}.txt")
+        file_path = data_path.joinpath(f"data{step:04d}.dat")
         save_proxy_matrix(proxy, file_path)
 
 
@@ -450,7 +450,7 @@ def reconstruct_temperature():
 
 
 def reconstruction_steps():
-    path = CONFIG_PATH.joinpath("steps.txt")
+    path = CONFIG_PATH.joinpath("steps.csv")
     with open(path, "r", newline="") as f:
         reader = csv.reader(f)
         steps = next(reader)
@@ -476,7 +476,7 @@ def reconstructed_temperature_field(step):
 
 def reconstructed_svd(step):
     # Load proxy matrix.
-    filename = f"data{step:04d}.txt"
+    filename = f"data{step:04d}.dat"
     proxy_path = PROXY_PATH.joinpath("networks", filename)
     p = np.genfromtxt(proxy_path)
     fill_in_proxy_matrix(p)
@@ -485,7 +485,7 @@ def reconstructed_svd(step):
     index_cal = (p[:, 0] >= CAL_START) & (p[:, 0] <= CAL_END)
     
     # Load instrumental PC retention.
-    filename = f"eoflist{step:04d}.txt"
+    filename = f"eoflist{step:04d}.csv"
     eofs_path = CONFIG_PATH.joinpath("instrumental", filename)
     with open(eofs_path, "r", newline="") as f:
         reader = csv.reader(f)
@@ -579,7 +579,7 @@ def analyze_regions(recon):
     # Save calibration RE statistics.
     step_path = VALIDATION_PATH.joinpath("steps")
     step_path.mkdir(exist_ok=True)
-    re_path = step_path.joinpath(f"cal_re{step:04d}.txt")
+    re_path = step_path.joinpath(f"cal_re{step:04d}.csv")
     header = ["GLB", "NH", "DET", "NIN", "MLT"]
     data = [glob_cal_re, nhem_cal_re, detr_cal_re, nino_cal_re, mult_cal_re]
     with open(re_path, "w") as f:
@@ -588,7 +588,7 @@ def analyze_regions(recon):
         writer.writerow(data)
     
     # Save verification RE statistics.
-    re_path = step_path.joinpath(f"ver_re{step:04d}.txt")
+    re_path = step_path.joinpath(f"ver_re{step:04d}.csv")
     header = ["GLB", "NH", "MLTA"]
     data = [glob_ver_re, nhem_ver_re, mult_ver_re]
     with open(re_path, "w") as f:
@@ -669,14 +669,14 @@ def make_re_table():
         for step in reversed(sorted(reconstruction_steps())):
             line = f"{step:04d}"
             # Calibration RE.
-            path = VALIDATION_PATH.joinpath("steps", f"cal_re{step:04d}.txt")
+            path = VALIDATION_PATH.joinpath("steps", f"cal_re{step:04d}.csv")
             df = pd.read_csv(path)
             data = df.to_numpy()
             line = line + " "
             for value in data[0, :]:
                 line = line + f"{value:6.2f}"
             # Verification RE.
-            path = VALIDATION_PATH.joinpath("steps", f"ver_re{step:04d}.txt")
+            path = VALIDATION_PATH.joinpath("steps", f"ver_re{step:04d}.csv")
             df = pd.read_csv(path)
             data = df.to_numpy()
             line = line + " "
