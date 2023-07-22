@@ -1,0 +1,7 @@
+# Generated files
+mbh98emu/downloads/
+mbh98emu/instrumental/
+mbh98emu/proxy/
+mbh98emu/reconstruction/
+mbh98emu/validation/
+__pycache__/
