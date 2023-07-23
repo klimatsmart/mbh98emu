@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-This script emulates the MBH98 temperature reconstruction.
+"""MBH98 hockey stick emulation."""
 
-Tested with Python 3.9.2 and the following packages installed:
-    
-    * requests  2.25.1
-    * NumPy     1.19.5
-    * SciPy     1.6.0
-    * pandas    1.1.5
-"""
 import pathlib
 import shutil
 import tarfile
 import csv
+
 import requests
 import numpy as np
-import scipy.signal as sps
 import pandas as pd
+
+import svdalg
 
 # Prepare directories.
 ROOT_PATH = pathlib.Path(__file__).resolve().parents[1]
@@ -41,6 +35,10 @@ CAL_START = 1902
 CAL_END = 1980
 VER_START = 1854
 VER_END = 1901
+
+# Other constants.
+PI = 3.14159265359
+EOF_MAX = 40
 
 
 def get_instrumental_data():
@@ -75,6 +73,7 @@ def prepare_instrumental_data():
     compute_gridbox_statistics()
     center_annual_means()
     compute_instrumental_svd()
+    process_instrumental_svd()
 
 
 def read_instrumental_data():
@@ -83,12 +82,11 @@ def read_instrumental_data():
     date = []
     temperature = np.full((month_count, box_count), np.nan)
     lines_per_month = box_count/18 + 1
-    path = DOWNLOAD_PATH.joinpath("anomalies-new")
-    with open(path, "r") as f:
+    with open(DOWNLOAD_PATH.joinpath("anomalies-new"), "r") as f:
         month = -1
         for count, line in enumerate(f):
             if count % lines_per_month == 0:
-                date.append(f"{int(line[0:5])}-{int(line[5:10])}")
+                date.append(f"{int(line[5:10])}-{int(line[0:5])}")
                 month += 1
                 col = 0
             else:
@@ -123,16 +121,14 @@ def create_instrumental_dataframe():
     date, temperature = read_instrumental_data()
     rearrange_instrumental_data(temperature)
     lat, lon = instrumental_gridpoints()
-    index = pd.to_datetime(date)
+    index = pd.to_datetime(date, format="%Y-%m")
     columns = pd.MultiIndex.from_arrays((lat, lon), names=("lat", "lon"))
     df = pd.DataFrame(data=temperature, index=index, columns=columns)
-    path = INSTRUMENTAL_PATH.joinpath("anomalies-new.pkl")
-    df.to_pickle(path)
+    df.to_pickle(INSTRUMENTAL_PATH.joinpath("anomalies-new.pkl"))
 
 
 def dense_subset():
-    path = INSTRUMENTAL_PATH.joinpath("anomalies-new.pkl")
-    df = pd.read_pickle(path)
+    df = pd.read_pickle(INSTRUMENTAL_PATH.joinpath("anomalies-new.pkl"))
     t = df.loc[str(CAL_START):str(CAL_END), :].to_numpy()
     columns = []
     for i, col in enumerate(t.T):
@@ -145,8 +141,7 @@ def dense_subset():
 
 
 def sparse_subset():
-    path = INSTRUMENTAL_PATH.joinpath("anomalies-new.pkl")
-    df = pd.read_pickle(path)
+    df = pd.read_pickle(INSTRUMENTAL_PATH.joinpath("anomalies-new.pkl"))
     t = df.loc[str(VER_START):str(CAL_END), :].to_numpy()
     columns = []
     for i, col in enumerate(t.T):
@@ -166,8 +161,7 @@ def prepare_dense_subset():
     fill_in_instrumental_data(df)
     round_to_2_decimal_places(df)
     df = df.loc[str(CAL_START):]
-    path = INSTRUMENTAL_PATH.joinpath("dense_subset_monthly.pkl")
-    df.to_pickle(path)
+    df.to_pickle(INSTRUMENTAL_PATH.joinpath("dense_subset_monthly.pkl"))
 
 
 def prepare_sparse_subset():
@@ -176,8 +170,7 @@ def prepare_sparse_subset():
     fill_in_instrumental_data(df)
     df = annual_means(df)
     round_to_2_decimal_places(df)
-    path = INSTRUMENTAL_PATH.joinpath("sparse_subset.pkl")
-    df.to_pickle(path)
+    df.to_pickle(INSTRUMENTAL_PATH.joinpath("sparse_subset.pkl"))
 
 
 def fill_in_instrumental_data(df):
@@ -186,22 +179,21 @@ def fill_in_instrumental_data(df):
     for i in range(t.shape[1]):
         # Indices with data.
         j = (~np.isnan(t[:, i])).nonzero()[0]
-        if j.size > 0:
-            # Constant extrapolation to the left.
-            t[:j[0], i] = t[j[0], i]
-            
-            # Linear interpolation.
-            interpolate32(t[:, i])
-            
-            # Extrapolation to the right.
-            if j[-1] < n - 2:
-                # Linear extrapolation towards zero.
-                gap = n - j[-1]
-                t[j[-1]+1:, i] = linspace32(t[j[-1], i], 0, gap+1)[1:-1]
-            elif j[-1] == n - 2:
-                # Special rule when only the last value is missing.
-                t[-1, i] = 0.5 * add32(t[-3, i], t[-2, i])
-    df[:] = t
+        
+        # Constant extrapolation to the left.
+        t[:j[0], i] = t[j[0], i]
+        
+        # Linear interpolation.
+        interpolate32(t[:, i])
+        
+        # Extrapolation to the right.
+        if j[-1] < n - 2:
+            # Linear extrapolation towards zero.
+            gap = n - j[-1]
+            t[j[-1]+1:, i] = linspace32(t[j[-1], i], 0, gap+1)[1:-1]
+        elif j[-1] == n - 2:
+            # Special rule when only the last value is missing.
+            t[-1, i] = div32(add32(t[-3, i], t[-2, i]), 2)
 
 
 def interpolate32(t):
@@ -239,8 +231,8 @@ def div32(a, b):
 
 def array_sum32(a):
     s = np.float32(0)
-    for num in a:
-        s = add32(s, num)
+    for element in a:
+        s = add32(s, element)
     return s
 
 
@@ -252,6 +244,25 @@ def column_mean32(a):
     return mu
 
 
+def linear_fit32(y, x0=0):
+    # Fit lines to the columns of y.
+    n, m = y.shape
+    sum_x = np.zeros(m, dtype=np.float32)
+    sum_xx = np.zeros(m, dtype=np.float32)
+    sum_y = np.zeros(m, dtype=np.float32)
+    sum_xy = np.zeros(m, dtype=np.float32)
+    for i in range(n):
+        x = x0 + i + 1
+        sum_x += np.float32(x)
+        sum_xx += np.float32(x**2)
+        sum_y += y[i, :]
+        sum_xy += y[i, :] * np.float32(x)
+    n = np.float32(n)
+    alpha = (sum_xx*sum_y - sum_x*sum_xy) / (n*sum_xx - sum_x**2)
+    beta = (n*sum_xy - sum_x*sum_y) / (n*sum_xx - sum_x**2)
+    return alpha, beta
+
+
 def convert_to_degrees(df):
     t = df.to_numpy()
     t[t == -9999] = np.nan
@@ -259,7 +270,6 @@ def convert_to_degrees(df):
 
 
 def invert_anomalies_below_minus_10(df):
-    # This function emulates a programming error.
     t = df.to_numpy()
     t[t <= -10] *= -1
 
@@ -272,7 +282,7 @@ def round_to_2_decimal_places(df):
 def annual_means(df):
     years = sorted(set(df.index.year))
     df_annual = pd.DataFrame(index=years, columns=df.columns,
-                              dtype=np.float32)
+                             dtype=np.float64)
     for year in years:
         t = df.loc[df.index.year == year].to_numpy()
         df_annual.loc[year, :] = column_mean32(t)
@@ -284,21 +294,29 @@ def compute_gridbox_statistics():
     path = INSTRUMENTAL_PATH.joinpath("dense_subset_monthly.pkl")
     df = pd.read_pickle(path)
     t = df.to_numpy()
-
+    
     # Means.
     month_count = 12 * (CAL_END - CAL_START + 1)
-    mu = t[:month_count, :].mean(axis=0)
+    mu = np.zeros(t.shape[1], dtype=np.float32)
+    for i in range(month_count):
+        mu += t[i, :]
+    mu = (mu / month_count).astype(np.float64)
+    t -= mu
     
     # Detrended standard deviations.
-    sigma = sps.detrend(t, axis=0).std(axis=0, ddof=0)
+    month_count = 12 * (INSTR_END - CAL_START + 1)
+    start_month = 12 * (CAL_START - INSTR_START)
+    sigma = np.zeros(t.shape[1])
+    alpha, beta = linear_fit32(t, start_month)
+    for i in range(t.shape[0]):
+        month = start_month + i + 1
+        detrended = t[i, :] - beta*np.float32(month) - alpha
+        sigma += detrended**2
+    sigma = np.sqrt(sigma / month_count)
     
     # Save statistics.
-    path = INSTRUMENTAL_PATH.joinpath("statistics")
-    path.mkdir(exist_ok=True)
-    mu_path = path.joinpath("mu.npy")
-    sigma_path = path.joinpath("sigma.npy")
-    np.save(mu_path, mu)
-    np.save(sigma_path, sigma)
+    np.save(INSTRUMENTAL_PATH.joinpath("mu.npy"), mu)
+    np.save(INSTRUMENTAL_PATH.joinpath("sigma.npy"), sigma)
 
 
 def center_annual_means():
@@ -309,8 +327,7 @@ def center_annual_means():
     df_sparse = pd.read_pickle(sparse_path)
     
     # Load means for dense subset.
-    mu_path = INSTRUMENTAL_PATH.joinpath("statistics", "mu.npy")
-    mu = np.load(mu_path)
+    mu = np.load(INSTRUMENTAL_PATH.joinpath("mu.npy"))
     
     # Center instrumental data.
     mu = pd.Series(data=mu, index=df_dense_monthly.columns)
@@ -323,44 +340,99 @@ def center_annual_means():
     # Save centered data.
     dense_path = INSTRUMENTAL_PATH.joinpath("dense_subset_centered.pkl")
     sparse_path = INSTRUMENTAL_PATH.joinpath("sparse_subset_centered.pkl")
-    pd.to_pickle(df_dense, dense_path)
-    pd.to_pickle(df_sparse, sparse_path)
+    df_dense.to_pickle(dense_path)
+    df_sparse.to_pickle(sparse_path)
 
 
 def compute_instrumental_svd():
     # Load dense subset of instrumental data.
     path = INSTRUMENTAL_PATH.joinpath("dense_subset_monthly.pkl")
     df_monthly = pd.read_pickle(path)
-
-    # Statistics for standardization.
-    mu_path = INSTRUMENTAL_PATH.joinpath("statistics", "mu.npy")
-    sigma_path = INSTRUMENTAL_PATH.joinpath("statistics", "sigma.npy")
-    mu = np.load(mu_path)
-    sigma = np.load(sigma_path)
-
+    
+    # Load statistics for standardization.
+    mu = np.load(INSTRUMENTAL_PATH.joinpath("mu.npy"))
+    sigma = np.load(INSTRUMENTAL_PATH.joinpath("sigma.npy"))
+    
     # Standardize data.
     t = df_monthly.to_numpy()
     t_zscores = (t - mu) / sigma
-
+    
     # Compute singular value decomposition of standardized and area
     # weighted instrumental data.
     lat = np.array(df_monthly.columns.get_level_values(0))
-    w = np.cos(np.deg2rad(lat))
+    w = np.cos(lat*PI/180)
     t_weighted = t_zscores * w
-    u_monthly, s, vt = np.linalg.svd(t_weighted)
+    u_monthly, s, v = svdalg.svd(t_weighted)
+    
+    # Make svd dataframes.
     u_monthly = pd.DataFrame(data=u_monthly, index=df_monthly.index)
-    u = u_monthly.groupby(u_monthly.index.year).mean()
-    vt = pd.DataFrame(data=vt, columns=df_monthly.columns)
+    v = pd.DataFrame(data=v, index=df_monthly.columns)
     
     # Save svd.
     svd_path = INSTRUMENTAL_PATH.joinpath("svd")
     svd_path.mkdir(exist_ok=True)
-    u_path = svd_path.joinpath("u.pkl")
-    s_path = svd_path.joinpath("s.npy")
-    vt_path = svd_path.joinpath("vt.pkl")
-    u.to_pickle(u_path)
-    np.save(s_path, s)
-    vt.to_pickle(vt_path)
+    u_monthly.to_pickle(svd_path.joinpath("u_monthly.pkl"))
+    v.to_pickle(svd_path.joinpath("v.pkl"))
+    np.save(svd_path.joinpath("s.npy"), s)
+
+
+def process_instrumental_svd():
+    # Load full precision svd.
+    svd_path = INSTRUMENTAL_PATH.joinpath("svd")
+    u_monthly = pd.read_pickle(svd_path.joinpath("u_monthly.pkl"))
+    v = pd.read_pickle(svd_path.joinpath("v.pkl"))
+    s = np.load(svd_path.joinpath("s.npy"))
+    
+    # Save svd rounded to 6 and 14 significant figures.
+    u_path = svd_path.joinpath("u_monthly_rounded.txt")
+    v_path = svd_path.joinpath("v_rounded.txt")
+    s_path = svd_path.joinpath("s.txt")
+    np.savetxt(u_path, u_monthly.to_numpy(dtype=np.float32), fmt="%.5e")
+    np.savetxt(v_path, v.to_numpy(dtype=np.float32), fmt="%.5e")
+    np.savetxt(s_path, s, fmt="%.13e")
+    
+    # Load rounded singular vectors and save as binary.
+    v_rounded = np.genfromtxt(v_path)
+    v_rounded = pd.DataFrame(data=v_rounded, index=v.index)
+    v_rounded.to_pickle(svd_path.joinpath("v_rounded.pkl"))
+    u_monthly_rounded = np.genfromtxt(u_path)
+    u_monthly_rounded = pd.DataFrame(data=u_monthly_rounded,
+                                     index=u_monthly.index)
+    
+    # Standardize annual means of left singular vectors.
+    u = annual_means(u_monthly_rounded)
+    data = u.to_numpy()
+    mu = np.zeros(data.shape[1])
+    cal_length = np.float32(CAL_END - CAL_START + 1)
+    for i in range(int(cal_length)):
+        mu += data[i, :]
+    mu /= cal_length
+    data -= mu
+    
+    # Standardize by detrended standard deviations.
+    sigma = np.zeros(data.shape[1])
+    alpha, beta = linear_fit32(data[:int(cal_length), :])
+    for i in range(int(cal_length)):
+        detrended = data[i, :] - beta*np.float32(i+1) - alpha
+        sigma += detrended**2
+    sigma = np.sqrt(sigma / cal_length)
+    data /= sigma
+    
+    # Save standardized singular vectors and statistics.
+    u.to_pickle(svd_path.joinpath("u_zscores.pkl"))
+    np.save(svd_path.joinpath("mu_u.npy"), mu)
+    np.save(svd_path.joinpath("sigma_u.npy"), sigma)
+    
+    # Undo detrending and save again rounded to 14 significant figures.
+    data *= sigma
+    data += mu
+    np.savetxt(svd_path.joinpath("u.txt"), data, fmt="%.13e")
+    
+    # Weights.
+    s = np.genfromtxt(s_path)
+    ssum = array_sum32(s[:EOF_MAX]) / np.float32(EOF_MAX)
+    w = s / ssum
+    np.save(svd_path.joinpath("weights.npy"), w)
 
 
 def prepare_proxy_data():
@@ -375,46 +447,49 @@ def extract_proxy_archive():
     untar(tar_path, untar_path)
 
 
-def untar(tar, path):
-    if not path.is_dir():
-        with tarfile.TarFile(tar, "r") as f:
-            f.extractall(path)
+def untar(tar_path, untar_path):
+    if not untar_path.is_dir():
+        with tarfile.TarFile(tar_path, "r") as f:
+            f.extractall(untar_path)
 
 
 def create_proxy_matrices():
-    lists_path = CONFIG_PATH.joinpath("proxy")
+    datalists_path = CONFIG_PATH.joinpath("proxy")
     data_path = PROXY_PATH.joinpath("networks")
     data_path.mkdir(exist_ok=True)
     for step in reconstruction_steps():
-        datalist_path = lists_path.joinpath(f"datalist{step:04d}.dat")
-        proxy = proxy_matrix(datalist_path)
-        file_path = data_path.joinpath(f"data{step:04d}.dat")
-        save_proxy_matrix(proxy, file_path)
+        p = proxy_matrix(datalists_path.joinpath(f"datalist{step}.dat"))
+        save_proxy_matrix(p, data_path.joinpath(f"data{step}.dat"))
 
 
 def proxy_matrix(datalist_path):
-    # Create a proxy data matrix with time in the first column.
+    # Create a proxy data matrix with year in the first column.
     mbh98_path = PROXY_PATH.joinpath("mbh98")
     with open(datalist_path, "r") as f:
         relative_paths = f.read().splitlines()
-    year = int(datalist_path.stem.strip("datalist"))
-    n = CAL_END - year + 1
+    step = int(datalist_path.stem.strip("datalist"))
+    n = CAL_END - step + 1
     m = len(relative_paths) + 1
-    proxy = np.full((n, m), np.nan)
-    proxy[:, 0] = np.arange(year, CAL_END + 1)
+    p = np.full((n, m), np.nan)
+    p[:, 0] = np.arange(step, CAL_END + 1)
     for i, relative_path in enumerate(relative_paths):
         data_path = mbh98_path.joinpath(*relative_path.split("/"))
-        p = pd.read_table(data_path, header=None)
-        p = p[0].str.split(expand=True).astype(float).to_numpy()
-        p = submatrix(p, year, CAL_END)
-        index = p[:, 0].astype(int) - year
-        proxy[index, i+1] = p[:, 1]
-    return proxy
+        data = read_proxy_data(data_path)
+        data = submatrix(data, step, CAL_END)
+        index = data[:, 0].astype(int) - step
+        p[index, i+1] = data[:, 1]
+    return p
 
 
-def save_proxy_matrix(proxy, path):
-    m = proxy.shape[1]
-    np.savetxt(path, proxy, fmt="%04d" + "%14.6e" * (m-1))
+def read_proxy_data(path):
+    p = pd.read_table(path, header=None)
+    p = p[0].str.split(expand=True).astype(float).to_numpy()
+    return p
+
+
+def save_proxy_matrix(p, path):
+    m = p.shape[1]
+    np.savetxt(path, p, fmt="%4d" + "%14.6e" * (m-1))
 
 
 def fill_in_proxy_matrix(p):
@@ -424,12 +499,32 @@ def fill_in_proxy_matrix(p):
             p[index[-1]:, i] = p[index[-1], i]
 
 
-def standardize_proxy_matrix(p, t0, t1):
-    # Standardize proxy matrix p over time period [t0, t1].
-    p_cal = submatrix(p, t0, t1)
-    mu = p_cal[:, 1:].mean(axis=0)
-    sigma = sps.detrend(p_cal[:, 1:], axis=0).std(axis=0, ddof=0)
+def standardize_proxy_matrix(p):
+    # Standardize proxy matrix p over the calibration period.
+    p_cal = submatrix(p, CAL_START, CAL_END).copy()
+    mu = np.zeros(p.shape[1]-1)
+    cal_length = np.float32(CAL_END - CAL_START + 1)
+    for i in range(int(cal_length)):
+        mu += p_cal[i, 1:]
+    mu /= cal_length
+    p_cal[:, 1:] -= mu
     p[:, 1:] -= mu
+    
+    # Standardize by standard deviations.
+    sigma = np.zeros(p.shape[1]-1)
+    for i in range(int(cal_length)):
+        sigma += p_cal[i, 1:]**2
+    sigma = np.sqrt(sigma / cal_length)
+    p_cal[:, 1:] /= sigma
+    p[:, 1:] /= sigma
+    
+    # Standardize again by detrended standard deviations.
+    sigma = np.zeros(p.shape[1]-1)
+    alpha, beta = linear_fit32(p_cal[:, 1:])
+    for i in range(int(cal_length)):
+        detrended = p_cal[i, 1:] - beta*np.float32(i+1) - alpha
+        sigma += np.square(detrended, dtype=np.float32)
+    sigma = np.sqrt(sigma / cal_length)
     p[:, 1:] /= sigma
 
 
@@ -443,15 +538,10 @@ def reconstruct_temperature():
     for step in reconstruction_steps():
         recon = reconstructed_temperature_field(step)
         analyze_regions(recon)
-    
-    # Compile results.
-    concatenate_nhem_reconstructions()
-    make_re_table()
 
 
 def reconstruction_steps():
-    path = CONFIG_PATH.joinpath("steps.csv")
-    with open(path, "r", newline="") as f:
+    with open(CONFIG_PATH.joinpath("steps.csv"), "r", newline="") as f:
         reader = csv.reader(f)
         steps = next(reader)
     steps = [int(n) for n in steps]
@@ -459,67 +549,94 @@ def reconstruction_steps():
 
 
 def reconstructed_temperature_field(step):
-    u_recon, s_recon, vt_recon = reconstructed_svd(step)
+    u_recon, s, v = reconstructed_svd(step)
     
     # Undo weighting and scaling.
-    sigma_path = INSTRUMENTAL_PATH.joinpath("statistics", "sigma.npy")
-    sigma = np.load(sigma_path)
-    lat = np.array(vt_recon.columns.get_level_values(0))
-    w = np.cos(np.deg2rad(lat))
-    recon_weighted = (u_recon.to_numpy() * s_recon) @ vt_recon.to_numpy()
+    sigma = np.load(INSTRUMENTAL_PATH.joinpath("sigma.npy"))
+    lat = np.array(v.index.get_level_values(0))
+    w = np.cos(lat*PI/180)
+    recon_weighted = (u_recon.to_numpy() * s) @ v.to_numpy().T
     recon_zscores = recon_weighted / w
     recon = recon_zscores * sigma
-    recon = pd.DataFrame(data=recon, index=u_recon.index,
-                         columns=vt_recon.columns)
+    recon = pd.DataFrame(data=recon, index=u_recon.index, columns=v.index)
     return recon
 
 
 def reconstructed_svd(step):
     # Load proxy matrix.
-    filename = f"data{step:04d}.dat"
-    proxy_path = PROXY_PATH.joinpath("networks", filename)
-    p = np.genfromtxt(proxy_path)
+    p = np.genfromtxt(PROXY_PATH.joinpath("networks", f"data{step}.dat"))
+    p = p.astype(np.float32).astype(np.float64)
     fill_in_proxy_matrix(p)
-    standardize_proxy_matrix(p, CAL_START, CAL_END)
+    standardize_proxy_matrix(p)
     p_cal = submatrix(p, CAL_START, CAL_END)
     index_cal = (p[:, 0] >= CAL_START) & (p[:, 0] <= CAL_END)
     
-    # Load instrumental PC retention.
-    filename = f"eoflist{step:04d}.csv"
-    eofs_path = CONFIG_PATH.joinpath("instrumental", filename)
-    with open(eofs_path, "r", newline="") as f:
-        reader = csv.reader(f)
-        eofs = next(reader)
-    eofs = [int(n) - 1 for n in eofs]
+    # Load instrumental PC selection.
+    eofs = pc_selection(step)
     
     # Load instrumental svd.
     svd_path = INSTRUMENTAL_PATH.joinpath("svd")
-    u_path = svd_path.joinpath("u.pkl")
-    s_path = svd_path.joinpath("s.npy")
-    vt_path = svd_path.joinpath("vt.pkl")
-    u = pd.read_pickle(u_path)
-    s = np.load(s_path)
-    vt = pd.read_pickle(vt_path)
+    u_z = pd.read_pickle(svd_path.joinpath("u_zscores.pkl"))
+    v = pd.read_pickle(svd_path.joinpath("v_rounded.pkl"))
+    s = np.genfromtxt(svd_path.joinpath("s.txt"))
+    mu = np.load(svd_path.joinpath("mu_u.npy"))
+    sigma = np.load(svd_path.joinpath("sigma_u.npy"))
+    w = np.load(svd_path.joinpath("weights.npy"))
     
     # Calibration period.
-    u = u.loc[CAL_START:CAL_END, eofs]
-    u = u.to_numpy()
+    u_z_cal = u_z.loc[CAL_START:CAL_END, eofs]
+    u_z_cal = u_z_cal.to_numpy()
     
     # Calibrate proxy data against instrumental PCs.
-    g = np.linalg.lstsq(u, p_cal[:, 1:], rcond=None)[0]
+    g = lstsq(w[eofs] * u_z_cal, p_cal[:, 1:])
     
     # Reconstruct PCs.
-    u_recon = np.linalg.lstsq(g.T, p[:, 1:].T, rcond=None)[0].T
+    u_z_recon = lstsq(g.T, p[:, 1:].T).T
+    u_recon = u_z_recon * sigma[eofs] / w[eofs] + mu[eofs]
     
     # Rescale PCs.
-    sigma_recon = np.std(u_recon[index_cal, :], axis=0, ddof=0)
-    sigma_instr = np.std(u, axis=0, ddof=0)
-    u_recon *= sigma_instr / sigma_recon
+    sigma_recon = np.zeros(len(eofs), dtype=np.float32)
+    sigma_instr = np.zeros(len(eofs), dtype=np.float32)
+    u_recon_cal = u_recon[index_cal, :]
+    u_cal = u_z_cal * sigma[eofs] + mu[eofs]
+    cal_length = np.float32(CAL_END - CAL_START + 1)
+    for i in range(int(cal_length)):
+        sigma_recon += u_recon_cal[i, :]**2
+        sigma_instr += u_cal[i, :]**2
+    sigma_recon = np.sqrt(sigma_recon / cal_length)
+    sigma_instr = np.sqrt(sigma_instr / cal_length)
+    u_recon = u_recon * sigma_instr / sigma_recon
+    
+    # Save reconstructed singular vectors.
+    step_path = RECONSTRUCTION_PATH.joinpath("steps")
+    step_path.mkdir(exist_ok=True)
+    np.save(step_path.joinpath(f"rpc{step}.npy"), u_recon)
     
     # Create PC dataframe.
     u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int))
-    
-    return u_recon, s[eofs], vt.iloc[eofs]
+    return u_recon, s[eofs], v.iloc[:, eofs]
+
+
+def pc_selection(step):
+    # Load hard-coded PC selection.
+    path = CONFIG_PATH.joinpath("instrumental", f"eoflist{step}.csv")
+    with open(path, "r", newline="") as f:
+        reader = csv.reader(f)
+        eofs = next(reader)
+    eofs = [int(n) - 1 for n in eofs]
+    return eofs
+
+
+def lstsq(a, b):
+    u, s, v = svdalg.svd(a)
+    y = np.zeros((a.shape[1], b.shape[1]))
+    x = np.zeros(y.shape)
+    for i in range(y.shape[0]):
+        for j in range(y.shape[1]):
+            for k in range(a.shape[0]):
+                y[i, j] += np.float32(u[k, i]) * b[k, j] / s[i]
+    x = v.astype(np.float32) @ y
+    return x
 
 
 def analyze_regions(recon):
@@ -532,9 +649,7 @@ def analyze_regions(recon):
     # Instrumental means.
     dense_glob_instr = regional_mean(dense_instr, "glob")
     dense_nhem_instr = regional_mean(dense_instr, "nhem")
-    dense_detr_instr = sps.detrend(dense_nhem_instr.loc[CAL_START:CAL_END])
-    dense_detr_instr = pd.DataFrame(data=dense_detr_instr,
-                                    index=np.arange(CAL_START, CAL_END + 1))
+    dense_detr_instr = detrend_series(dense_nhem_instr.loc[CAL_START:CAL_END])
     dense_nino_instr = regional_mean(dense_instr, "nino")
     sparse_glob_instr = regional_mean(sparse_instr, "glob")
     sparse_nhem_instr = regional_mean(sparse_instr, "nhem")
@@ -543,71 +658,53 @@ def analyze_regions(recon):
     dense_recon = recon
     dense_glob_recon = regional_mean(dense_recon, "glob")
     dense_nhem_recon = regional_mean(dense_recon, "nhem")
-    dense_detr_recon = sps.detrend(dense_nhem_recon.loc[CAL_START:CAL_END])
-    dense_detr_recon = pd.DataFrame(data=dense_detr_recon,
-                                    index=np.arange(CAL_START, CAL_END + 1))
+    dense_detr_recon = detrend_series(dense_nhem_recon.loc[CAL_START:CAL_END])
     dense_nino_recon = regional_mean(dense_recon, "nino")
     sparse_recon = recon.loc[:, sparse_instr.columns]
     sparse_glob_recon = regional_mean(sparse_recon, "glob")
     sparse_nhem_recon = regional_mean(sparse_recon, "nhem")
     
     # Reduction of Error (RE) statistics.
-    glob_cal_re = re_statistic(dense_glob_recon, dense_glob_instr,
-                               CAL_START, CAL_END)
-    nhem_cal_re = re_statistic(dense_nhem_recon, dense_nhem_instr,
-                               CAL_START, CAL_END)
-    detr_cal_re = re_statistic(dense_detr_recon, dense_detr_instr,
-                               CAL_START, CAL_END)
-    nino_cal_re = re_statistic(dense_nino_recon, dense_nino_instr,
-                               CAL_START, CAL_END)
-    mult_cal_re = re_mult_statistic(dense_recon, dense_instr,
-                                    CAL_START, CAL_END)
-    glob_ver_re = re_statistic(sparse_glob_recon, sparse_glob_instr,
-                               VER_START, VER_END)
-    nhem_ver_re = re_statistic(sparse_nhem_recon, sparse_nhem_instr,
-                               VER_START, VER_END)
-    mult_ver_re = re_mult_statistic(sparse_recon, sparse_instr,
-                                    VER_START, VER_END)
+    glob_cal_re = re_statistic(dense_glob_recon, dense_glob_instr, "cal")
+    nhem_cal_re = re_statistic(dense_nhem_recon, dense_nhem_instr, "cal")
+    detr_cal_re = re_statistic(dense_detr_recon, dense_detr_instr, "cal")
+    nino_cal_re = re_statistic(dense_nino_recon, dense_nino_instr, "cal")
+    mult_cal_re = mult_re_statistic(dense_recon, dense_instr, "cal")
+    glob_ver_re = re_statistic(sparse_glob_recon, sparse_glob_instr, "ver")
+    nhem_ver_re = re_statistic(sparse_nhem_recon, sparse_nhem_instr, "ver")
+    mult_ver_re = mult_re_statistic(sparse_recon, sparse_instr, "ver")
     
-    # Save nhem reconstruction.
+    # Save Northern Hemisphere reconstruction.
     step = recon.index[0]
     step_path = RECONSTRUCTION_PATH.joinpath("steps")
     step_path.mkdir(exist_ok=True)
-    nhem_path = step_path.joinpath(f"nhem{step:04d}.txt")
-    save_series(nhem_path, dense_nhem_recon)
+    dense_nhem_recon.to_pickle(step_path.joinpath(f"nhem{step}.pkl"))
     
     # Save calibration RE statistics.
     step_path = VALIDATION_PATH.joinpath("steps")
     step_path.mkdir(exist_ok=True)
-    re_path = step_path.joinpath(f"cal_re{step:04d}.csv")
     header = ["GLB", "NH", "DET", "NIN", "MLT"]
     data = [glob_cal_re, nhem_cal_re, detr_cal_re, nino_cal_re, mult_cal_re]
-    with open(re_path, "w") as f:
+    with open(step_path.joinpath(f"cal_re{step}.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
     
     # Save verification RE statistics.
-    re_path = step_path.joinpath(f"ver_re{step:04d}.csv")
     header = ["GLB", "NH", "MLTA"]
     data = [glob_ver_re, nhem_ver_re, mult_ver_re]
-    with open(re_path, "w") as f:
+    with open(step_path.joinpath(f"ver_re{step}.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
 
 
-def save_series(path, series):
-    # Save pandas series.
-    array = np.empty((series.size, 2))
-    array[:, 0] = series.index
-    array[:, 1] = series.to_numpy()
-    save_array(path, array)
-
-
-def save_array(path, array):
-    np.savetxt(path, array, header="Year   Temperature", fmt="%04d %11.7f",
-               comments="")
+def detrend_series(s):
+    # Detrend pandas series.
+    data = s.to_numpy().copy()
+    alpha, beta = linear_fit32(data[:, np.newaxis])
+    data = data - beta*np.arange(1, data.size+1) - alpha
+    return pd.Series(data=data, index=s.index)
 
 
 def regional_mean(df, region):
@@ -621,13 +718,18 @@ def regional_mean(df, region):
         mask = (lat > -5) & (lat < 5) & (lon > -150) & (lon < -90)
     else:
         raise ValueError("Invalid region.")
-    weights = np.cos(np.deg2rad(lat)) * mask
-    weights /= array_sum32(weights)
-    mu = df @ weights
+    weights = np.cos(lat*PI/180) * mask
+    mu = (df @ weights) / array_sum32(weights)
     return mu
 
 
-def re_statistic(recon, target, start_year, end_year):
+def re_statistic(recon, target, period):
+    if period == "cal":
+        start_year, end_year = CAL_START, CAL_END
+    elif period == "ver":
+        start_year, end_year = VER_START, VER_END
+    else:
+        raise ValueError("Invalid period.")
     recon = recon.loc[start_year:end_year].to_numpy()
     target = target.loc[start_year:end_year].to_numpy()
     res = recon - target
@@ -636,7 +738,13 @@ def re_statistic(recon, target, start_year, end_year):
     return 1 - ssq_res/ssq_target
 
 
-def re_mult_statistic(recon, target, start_year, end_year):
+def mult_re_statistic(recon, target, period):
+    if period == "cal":
+        start_year, end_year = CAL_START, CAL_END
+    elif period == "ver":
+        start_year, end_year = VER_START, VER_END
+    else:
+        raise ValueError("Invalid period.")
     recon = recon.loc[start_year:end_year].to_numpy()
     target = target.loc[start_year:end_year].to_numpy()
     res = recon - target
@@ -645,38 +753,64 @@ def re_mult_statistic(recon, target, start_year, end_year):
     return 1 - ssq_res/ssq_target
 
 
+def summarize_results():
+    print("Summarizing results...")
+    concatenate_nhem_reconstructions()
+    concatenate_pc_reconstructions()
+    make_re_table()
+
+
 def concatenate_nhem_reconstructions():
     steps = sorted(reconstruction_steps())
     years = np.arange(steps[0], CAL_END + 1)
     recon = np.empty((years.size, 2))
     recon[:, 0] = years
     for step in steps:
-        path = RECONSTRUCTION_PATH.joinpath("steps", f"nhem{step:04d}.txt")
-        recon_step = np.genfromtxt(path, skip_header=1)
-        index = recon_step[:, 0].astype(int) - years[0]
-        recon[index, 1] = recon_step[:, 1]
+        path = RECONSTRUCTION_PATH.joinpath("steps", f"nhem{step}.pkl")
+        recon_step = pd.read_pickle(path)
+        index = years >= step
+        recon[index, 1] = recon_step.to_numpy()
     path = RECONSTRUCTION_PATH.joinpath("nhem_recon.txt")
-    save_array(path, recon)
+    np.savetxt(path, recon, header="Year   Temperature", fmt="%4d %11.7f",
+               comments="")
+
+
+def concatenate_pc_reconstructions():
+    steps = sorted(reconstruction_steps())
+    years = np.arange(steps[0], CAL_END + 1)
+    for i in range(5):
+        recon = np.full((years.size, 2), np.nan)
+        recon[:, 0] = years
+        for step in steps:
+            eofs = pc_selection(step)
+            if i in eofs:
+                path = RECONSTRUCTION_PATH.joinpath("steps", f"rpc{step}.npy")
+                recon_step = np.load(path)
+                index = years >= step
+                recon[index, 1] = recon_step[:, eofs.index(i)]
+        recon = recon[~np.isnan(recon[:, 1]), :]
+        path = RECONSTRUCTION_PATH.joinpath(f"rpc{i+1:02d}.txt")
+        np.savetxt(path, recon, header=f"Year   PC#{i+1}", fmt="%4d %12.8f",
+                   comments="")
 
 
 def make_re_table():
-    table_path = VALIDATION_PATH.joinpath("validation.txt")
-    with open(table_path, "w") as f:
+    with open(VALIDATION_PATH.joinpath("validation.txt"), "w") as f:
         f.write("Reconstruction RE statistics:\n\n")
         f.write("       Calibration                    Verification\n")
         f.write("Step   GLB   NH    DET   NIN   MLT    GLB   NH    MLTA\n")
         f.write("------------------------------------------------------\n")
         for step in reversed(sorted(reconstruction_steps())):
-            line = f"{step:04d}"
+            line = f"{step:4d}"
             # Calibration RE.
-            path = VALIDATION_PATH.joinpath("steps", f"cal_re{step:04d}.csv")
+            path = VALIDATION_PATH.joinpath("steps", f"cal_re{step}.csv")
             df = pd.read_csv(path)
             data = df.to_numpy()
             line = line + " "
             for value in data[0, :]:
                 line = line + f"{value:6.2f}"
             # Verification RE.
-            path = VALIDATION_PATH.joinpath("steps", f"ver_re{step:04d}.csv")
+            path = VALIDATION_PATH.joinpath("steps", f"ver_re{step}.csv")
             df = pd.read_csv(path)
             data = df.to_numpy()
             line = line + " "
@@ -691,6 +825,7 @@ def main():
     prepare_instrumental_data()
     prepare_proxy_data()
     reconstruct_temperature()
+    summarize_results()
 
 
 if __name__ == "__main__":
