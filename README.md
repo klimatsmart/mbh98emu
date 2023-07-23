@@ -1,24 +1,18 @@
-# MBH98emu
+# MBH98emu: a hockey stick emulation
 
-## Description
+MBH98emu is an accurate emulation of the iconic and much-debated Mann, Bradley & Hughes 1998 (MBH98) "hockey stick" temperature reconstruction.
 
-MBH98emu is an accurate emulation of the Mann, Bradley & Hughes 1998 (MBH98) "hockey stick" temperature reconstruction.
+## Status
 
-## Current status
+In testing, the Northern Hemisphere temperature reconstruction (the "hockey stick") has small errors in the last (seventh) decimal place. Reconstructed temperature principal components also have small errors in the last (eighth) decimal place.
 
-The emulated Northern Hemisphere reconstruction should be within 0.00001 °C of the original on most modern systems. That is several orders of magnitude closer than published emulations.
+This accuracy depends on IEEE-754 compliance and may not apply to all systems. The emulation should still be orders of magnitude more accurate than emulations found in the literature, for various reasons.
+
+The scope of MBH98emu does not include principal component selection rules, as the exact rules used in MBH98 are not known. Selections from MBH98 are hard-coded in mbh98emu/config/. This was handled similarly in published emulations.
 
 ## Usage
 
-Run the Python script mbh98emu/script/mbh98emu.py. The results are saved in mbh98emu/reconstruction/ and mbh98emu/validation/.
-
-Tested on Linux with Python 3.9.2 and the following packages installed:
-<pre>
-requests  2.25.1
-NumPy     1.19.5
-SciPy     1.6.0
-pandas    1.1.5
-</pre>
+Download the MBH98emu repository and run the Python script mbh98emu/script/mbh98emu.py. The results are saved in mbh98emu/reconstruction/ and mbh98emu/validation/. Some intermediate results are saved in other directories.
 
 ## Background reading
 
