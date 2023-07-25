@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """MBH98 hockey stick emulation."""
 
+import argparse
 import pathlib
 import shutil
 import tarfile
@@ -39,6 +40,37 @@ VER_END = 1901
 # Other constants.
 PI = 3.14159265359
 EOF_MAX = 40
+
+# Fast emulation option.
+parser = argparse.ArgumentParser()
+parser.add_argument("--fast", action="store_true",
+                    help="perform faster but less accurate emulation")
+args = parser.parse_args()
+FAST = args.fast
+
+
+def svd(a):
+    if FAST:
+        u, s, vt = np.linalg.svd(a, full_matrices=False)
+        v = vt.T
+    else:
+        u, s, v = svdalg.svd(a)
+    return u, s, v
+
+
+def lstsq(a, b):
+    # Return the least-squares solution to a*x = b.
+    if FAST:
+        x = np.linalg.lstsq(a, b, rcond=None)[0]
+    else:
+        u, s, v = svdalg.svd(a)
+        y = np.zeros((a.shape[1], b.shape[1]))
+        for i in range(y.shape[0]):
+            for j in range(y.shape[1]):
+                for k in range(a.shape[0]):
+                    y[i, j] += np.float32(u[k, i]) * b[k, j] / s[i]
+        x = v.astype(np.float32) @ y
+    return x
 
 
 def get_instrumental_data():
@@ -362,7 +394,7 @@ def compute_instrumental_svd():
     lat = np.array(df_monthly.columns.get_level_values(0))
     w = np.cos(lat*PI/180)
     t_weighted = t_zscores * w
-    u_monthly, s, v = svdalg.svd(t_weighted)
+    u_monthly, s, v = svd(t_weighted)
     
     # Make svd dataframes.
     u_monthly = pd.DataFrame(data=u_monthly, index=df_monthly.index)
@@ -463,7 +495,7 @@ def create_proxy_matrices():
 
 
 def proxy_matrix(datalist_path):
-    # Create a proxy data matrix with year in the first column.
+    # Return a proxy data matrix with year in the first column.
     mbh98_path = PROXY_PATH.joinpath("mbh98")
     with open(datalist_path, "r") as f:
         relative_paths = f.read().splitlines()
@@ -529,7 +561,7 @@ def standardize_proxy_matrix(p):
 
 
 def submatrix(x, t0, t1):
-    # Submatrix of x where the first column is in [t0, t1].
+    # Return a submatrix of x where the first column is in [t0, t1].
     return x[(x[:, 0] >= t0) & (x[:, 0] <= t1), :]
 
 
@@ -627,18 +659,6 @@ def pc_selection(step):
     return eofs
 
 
-def lstsq(a, b):
-    u, s, v = svdalg.svd(a)
-    y = np.zeros((a.shape[1], b.shape[1]))
-    x = np.zeros(y.shape)
-    for i in range(y.shape[0]):
-        for j in range(y.shape[1]):
-            for k in range(a.shape[0]):
-                y[i, j] += np.float32(u[k, i]) * b[k, j] / s[i]
-    x = v.astype(np.float32) @ y
-    return x
-
-
 def analyze_regions(recon):
     # Load instrumental data.
     dense_path = INSTRUMENTAL_PATH.joinpath("dense_subset_centered.pkl")
@@ -700,7 +720,7 @@ def analyze_regions(recon):
 
 
 def detrend_series(s):
-    # Detrend pandas series.
+    # Return a detrended pandas series.
     data = s.to_numpy().copy()
     alpha, beta = linear_fit32(data[:, np.newaxis])
     data = data - beta*np.arange(1, data.size+1) - alpha
