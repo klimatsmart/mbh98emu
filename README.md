@@ -8,11 +8,13 @@ In testing, the Northern Hemisphere temperature reconstruction (the "hockey stic
 
 This accuracy depends on IEEE-754 compliance and may not apply to all systems. The emulation should still be orders of magnitude more accurate than emulations found in the literature, for various reasons.
 
-The scope of MBH98emu does not include principal component selection rules, as the exact rules used in MBH98 are not known. Selections from MBH98 are hard-coded in mbh98emu/config/. This was handled similarly in published emulations.
+The scope of MBH98emu does not include principal component selection rules, as the exact rules used in MBH98 are not known. Selections from MBH98 are hard-coded in `mbh98emu/config/`. This was handled similarly in published emulations.
 
 ## Usage
 
-Download the MBH98emu repository and run the Python script mbh98emu/script/mbh98emu.py. The results are saved in mbh98emu/reconstruction/ and mbh98emu/validation/. Some intermediate results are saved in other directories.
+Download the MBH98emu repository and run the Python script `mbh98emu/script/mbh98emu.py`. The results are saved in `mbh98emu/reconstruction/` and `mbh98emu/validation/`. Some intermediate results are saved in other directories.
+
+A run may take around 10 minutes. Use the `--fast` flag for faster but less accurate emulation.
 
 ## Background reading
 
