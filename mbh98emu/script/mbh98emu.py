@@ -698,7 +698,9 @@ def analyze_regions(recon):
     step = recon.index[0]
     step_path = RECONSTRUCTION_PATH.joinpath("steps")
     step_path.mkdir(exist_ok=True)
-    dense_nhem_recon.to_pickle(step_path.joinpath(f"nhem{step}.pkl"))
+    np.savetxt(step_path.joinpath(f"nhem{step}.txt"),
+               series_to_array(dense_nhem_recon),
+               header="Year   Temperature", fmt="%4d %11.7f", comments="")
     
     # Save calibration RE statistics.
     step_path = VALIDATION_PATH.joinpath("steps")
@@ -717,6 +719,13 @@ def analyze_regions(recon):
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
+
+
+def series_to_array(s):
+    a = np.empty((s.size, 2))
+    a[:, 0] = s.index
+    a[:, 1] = s.to_numpy()
+    return a
 
 
 def detrend_series(s):
@@ -775,27 +784,27 @@ def mult_re_statistic(recon, target, period):
 
 def summarize_results():
     print("Summarizing results...")
-    concatenate_nhem_reconstructions()
-    concatenate_pc_reconstructions()
+    splice_nhem_reconstructions()
+    splice_pc_reconstructions()
     make_re_table()
 
 
-def concatenate_nhem_reconstructions():
+def splice_nhem_reconstructions():
     steps = sorted(reconstruction_steps())
     years = np.arange(steps[0], CAL_END + 1)
     recon = np.empty((years.size, 2))
     recon[:, 0] = years
     for step in steps:
-        path = RECONSTRUCTION_PATH.joinpath("steps", f"nhem{step}.pkl")
-        recon_step = pd.read_pickle(path)
+        path = RECONSTRUCTION_PATH.joinpath("steps", f"nhem{step}.txt")
+        recon_step = np.genfromtxt(path, skip_header=1)
         index = years >= step
-        recon[index, 1] = recon_step.to_numpy()
+        recon[index, 1] = recon_step[:, 1]
     path = RECONSTRUCTION_PATH.joinpath("nhem_recon.txt")
     np.savetxt(path, recon, header="Year   Temperature", fmt="%4d %11.7f",
                comments="")
 
 
-def concatenate_pc_reconstructions():
+def splice_pc_reconstructions():
     steps = sorted(reconstruction_steps())
     years = np.arange(steps[0], CAL_END + 1)
     for i in range(5):
