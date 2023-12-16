@@ -623,8 +623,8 @@ def reconstructed_svd(step):
     g = lstsq(w[eofs] * u_z_cal, p_cal[:, 1:])
     
     # Reconstruct PCs.
-    u_z_recon = lstsq(g.T, p[:, 1:].T).T
-    u_recon = u_z_recon * sigma[eofs] / w[eofs] + mu[eofs]
+    u_weighted_recon = lstsq(g.T, p[:, 1:].T).T
+    u_recon = u_weighted_recon * sigma[eofs] / w[eofs] + mu[eofs]
     
     # Rescale PCs.
     sigma_recon = np.zeros(len(eofs), dtype=np.float32)
@@ -642,7 +642,7 @@ def reconstructed_svd(step):
     # Save reconstructed singular vectors.
     step_path = RECONSTRUCTION_PATH.joinpath("steps")
     step_path.mkdir(exist_ok=True)
-    np.save(step_path.joinpath(f"rpc{step}.npy"), u_recon)
+    np.save(step_path.joinpath(f"rpc_{step}.npy"), u_recon)
     
     # Create PC dataframe.
     u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int))
@@ -698,8 +698,11 @@ def analyze_regions(recon):
     step = recon.index[0]
     step_path = RECONSTRUCTION_PATH.joinpath("steps")
     step_path.mkdir(exist_ok=True)
-    np.savetxt(step_path.joinpath(f"nhem{step}.txt"),
+    np.savetxt(step_path.joinpath(f"nhem_dense_{step}.txt"),
                series_to_array(dense_nhem_recon),
+               header="Year   Temperature", fmt="%4d %11.7f", comments="")
+    np.savetxt(step_path.joinpath(f"nhem_sparse_{step}.txt"),
+               series_to_array(sparse_nhem_recon),
                header="Year   Temperature", fmt="%4d %11.7f", comments="")
     
     # Save calibration RE statistics.
@@ -707,7 +710,7 @@ def analyze_regions(recon):
     step_path.mkdir(exist_ok=True)
     header = ["GLB", "NH", "DET", "NIN", "MLT"]
     data = [glob_cal_re, nhem_cal_re, detr_cal_re, nino_cal_re, mult_cal_re]
-    with open(step_path.joinpath(f"cal_re{step}.csv"), "w") as f:
+    with open(step_path.joinpath(f"cal_re_{step}.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
@@ -715,7 +718,7 @@ def analyze_regions(recon):
     # Save verification RE statistics.
     header = ["GLB", "NH", "MLTA"]
     data = [glob_ver_re, nhem_ver_re, mult_ver_re]
-    with open(step_path.joinpath(f"ver_re{step}.csv"), "w") as f:
+    with open(step_path.joinpath(f"ver_re_{step}.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
@@ -795,11 +798,11 @@ def splice_nhem_reconstructions():
     recon = np.empty((years.size, 2))
     recon[:, 0] = years
     for step in steps:
-        path = RECONSTRUCTION_PATH.joinpath("steps", f"nhem{step}.txt")
+        path = RECONSTRUCTION_PATH.joinpath("steps", f"nhem_dense_{step}.txt")
         recon_step = np.genfromtxt(path, skip_header=1)
         index = years >= step
         recon[index, 1] = recon_step[:, 1]
-    path = RECONSTRUCTION_PATH.joinpath("nhem_recon.txt")
+    path = RECONSTRUCTION_PATH.joinpath("nhem_reconstruction.txt")
     np.savetxt(path, recon, header="Year   Temperature", fmt="%4d %11.7f",
                comments="")
 
@@ -813,7 +816,7 @@ def splice_pc_reconstructions():
         for step in steps:
             eofs = pc_selection(step)
             if i in eofs:
-                path = RECONSTRUCTION_PATH.joinpath("steps", f"rpc{step}.npy")
+                path = RECONSTRUCTION_PATH.joinpath("steps", f"rpc_{step}.npy")
                 recon_step = np.load(path)
                 index = years >= step
                 recon[index, 1] = recon_step[:, eofs.index(i)]
@@ -832,14 +835,14 @@ def make_re_table():
         for step in reversed(sorted(reconstruction_steps())):
             line = f"{step:4d}"
             # Calibration RE.
-            path = VALIDATION_PATH.joinpath("steps", f"cal_re{step}.csv")
+            path = VALIDATION_PATH.joinpath("steps", f"cal_re_{step}.csv")
             df = pd.read_csv(path)
             data = df.to_numpy()
             line = line + " "
             for value in data[0, :]:
                 line = line + f"{value:6.2f}"
             # Verification RE.
-            path = VALIDATION_PATH.joinpath("steps", f"ver_re{step}.csv")
+            path = VALIDATION_PATH.joinpath("steps", f"ver_re_{step}.csv")
             df = pd.read_csv(path)
             data = df.to_numpy()
             line = line + " "
