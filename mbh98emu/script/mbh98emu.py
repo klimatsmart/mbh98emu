@@ -49,8 +49,8 @@ args = parser.parse_args()
 FAST = args.fast
 
 
-def svd(a):
-    if FAST:
+def svd(a, fast=False):
+    if fast:
         u, s, vt = np.linalg.svd(a, full_matrices=False)
         v = vt.T
     else:
@@ -58,9 +58,9 @@ def svd(a):
     return u, s, v
 
 
-def lstsq(a, b):
+def lstsq(a, b, fast=False):
     # Return the least-squares solution to a*x = b.
-    if FAST:
+    if fast:
         x = np.linalg.lstsq(a, b, rcond=None)[0]
     else:
         u, s, v = svdalg.svd(a)
@@ -74,7 +74,7 @@ def lstsq(a, b):
 
 
 def get_instrumental_data():
-    url = "http://www.meteo.psu.edu/holocene/public_html/shared/research/MANNETAL98/INSTRUMENTAL/anomalies-new"
+    url = "https://www.meteo.psu.edu/holocene/public_html/shared/research/MANNETAL98/INSTRUMENTAL/anomalies-new"
     path = DOWNLOAD_PATH.joinpath("anomalies-new")
     if not path.is_file():
         print(f"Downloading instrumental data from {url}...")
@@ -302,6 +302,7 @@ def convert_to_degrees(df):
 
 
 def invert_anomalies_below_minus_10(df):
+    # Emulate a programming error.
     t = df.to_numpy()
     t[t <= -10] *= -1
 
@@ -394,7 +395,7 @@ def compute_instrumental_svd():
     lat = np.array(df_monthly.columns.get_level_values(0))
     w = np.cos(lat*PI/180)
     t_weighted = t_zscores * w
-    u_monthly, s, v = svd(t_weighted)
+    u_monthly, s, v = svd(t_weighted, fast=FAST)
     
     # Make svd dataframes.
     u_monthly = pd.DataFrame(data=u_monthly, index=df_monthly.index)
@@ -475,7 +476,7 @@ def prepare_proxy_data():
 
 def extract_proxy_archive():
     tar_path = DOWNLOAD_PATH.joinpath("mbh98.tar")
-    untar_path = PROXY_PATH.joinpath("mbh98")
+    untar_path = DOWNLOAD_PATH.joinpath("mbh98")
     untar(tar_path, untar_path)
 
 
@@ -486,24 +487,21 @@ def untar(tar_path, untar_path):
 
 
 def create_proxy_matrices():
-    datalists_path = CONFIG_PATH.joinpath("proxy")
-    data_path = PROXY_PATH.joinpath("networks")
-    data_path.mkdir(exist_ok=True)
     for step in reconstruction_steps():
-        p = proxy_matrix(datalists_path.joinpath(f"datalist{step}.dat"))
-        save_proxy_matrix(p, data_path.joinpath(f"data{step}.dat"))
+        p = proxy_matrix(CONFIG_PATH.joinpath(f"datalist{step}.dat"))
+        save_proxy_matrix(p, PROXY_PATH.joinpath(f"data{step}.dat"))
 
 
 def proxy_matrix(datalist_path):
     # Return a proxy data matrix with year in the first column.
-    mbh98_path = PROXY_PATH.joinpath("mbh98")
+    mbh98_path = DOWNLOAD_PATH.joinpath("mbh98")
     with open(datalist_path, "r") as f:
         relative_paths = f.read().splitlines()
     step = int(datalist_path.stem.strip("datalist"))
     n = CAL_END - step + 1
-    m = len(relative_paths) + 1
-    p = np.full((n, m), np.nan)
-    p[:, 0] = np.arange(step, CAL_END + 1)
+    m = len(relative_paths)
+    p = np.full((n, m+1), np.nan)
+    p[:, 0] = np.arange(step, CAL_END+1)
     for i, relative_path in enumerate(relative_paths):
         data_path = mbh98_path.joinpath(*relative_path.split("/"))
         data = read_proxy_data(data_path)
@@ -520,8 +518,8 @@ def read_proxy_data(path):
 
 
 def save_proxy_matrix(p, path):
-    m = p.shape[1]
-    np.savetxt(path, p, fmt="%4d" + "%14.6e" * (m-1))
+    m = p.shape[1] - 1
+    np.savetxt(path, p, fmt="%4d" + "%14.6e" * m)
 
 
 def fill_in_proxy_matrix(p):
@@ -535,7 +533,7 @@ def standardize_proxy_matrix(p):
     # Standardize proxy matrix p over the calibration period.
     p_cal = submatrix(p, CAL_START, CAL_END).copy()
     mu = np.zeros(p.shape[1]-1)
-    cal_length = np.float32(CAL_END - CAL_START + 1)
+    cal_length = np.float32(CAL_END-CAL_START+1)
     for i in range(int(cal_length)):
         mu += p_cal[i, 1:]
     mu /= cal_length
@@ -572,14 +570,6 @@ def reconstruct_temperature():
         analyze_regions(recon)
 
 
-def reconstruction_steps():
-    with open(CONFIG_PATH.joinpath("steps.csv"), "r", newline="") as f:
-        reader = csv.reader(f)
-        steps = next(reader)
-    steps = [int(n) for n in steps]
-    return steps
-
-
 def reconstructed_temperature_field(step):
     u_recon, s, v = reconstructed_svd(step)
     
@@ -596,15 +586,15 @@ def reconstructed_temperature_field(step):
 
 def reconstructed_svd(step):
     # Load proxy matrix.
-    p = np.genfromtxt(PROXY_PATH.joinpath("networks", f"data{step}.dat"))
+    p = np.genfromtxt(PROXY_PATH.joinpath(f"data{step}.dat"))
     p = p.astype(np.float32).astype(np.float64)
     fill_in_proxy_matrix(p)
     standardize_proxy_matrix(p)
     p_cal = submatrix(p, CAL_START, CAL_END)
     index_cal = (p[:, 0] >= CAL_START) & (p[:, 0] <= CAL_END)
     
-    # Load instrumental PC selection.
-    eofs = pc_selection(step)
+    # Load instrumental EOF selection.
+    eof_list = eof_selection(step)
     
     # Load instrumental svd.
     svd_path = INSTRUMENTAL_PATH.joinpath("svd")
@@ -616,21 +606,21 @@ def reconstructed_svd(step):
     w = np.load(svd_path.joinpath("weights.npy"))
     
     # Calibration period.
-    u_z_cal = u_z.loc[CAL_START:CAL_END, eofs]
+    u_z_cal = u_z.loc[CAL_START:CAL_END, eof_list]
     u_z_cal = u_z_cal.to_numpy()
     
     # Calibrate proxy data against instrumental PCs.
-    g = lstsq(w[eofs] * u_z_cal, p_cal[:, 1:])
+    g = lstsq(w[eof_list] * u_z_cal, p_cal[:, 1:], fast=FAST)
     
     # Reconstruct PCs.
-    u_weighted_recon = lstsq(g.T, p[:, 1:].T).T
-    u_recon = u_weighted_recon * sigma[eofs] / w[eofs] + mu[eofs]
+    u_weighted_recon = lstsq(g.T, p[:, 1:].T, fast=FAST).T
+    u_recon = u_weighted_recon * sigma[eof_list] / w[eof_list] + mu[eof_list]
     
     # Rescale PCs.
-    sigma_recon = np.zeros(len(eofs), dtype=np.float32)
-    sigma_instr = np.zeros(len(eofs), dtype=np.float32)
+    sigma_recon = np.zeros(len(eof_list), dtype=np.float32)
+    sigma_instr = np.zeros(len(eof_list), dtype=np.float32)
     u_recon_cal = u_recon[index_cal, :]
-    u_cal = u_z_cal * sigma[eofs] + mu[eofs]
+    u_cal = u_z_cal * sigma[eof_list] + mu[eof_list]
     cal_length = np.float32(CAL_END - CAL_START + 1)
     for i in range(int(cal_length)):
         sigma_recon += u_recon_cal[i, :]**2
@@ -640,23 +630,37 @@ def reconstructed_svd(step):
     u_recon = u_recon * sigma_instr / sigma_recon
     
     # Save reconstructed singular vectors.
-    step_path = RECONSTRUCTION_PATH.joinpath("steps")
-    step_path.mkdir(exist_ok=True)
-    np.save(step_path.joinpath(f"rpc_{step}.npy"), u_recon)
+    path = RECONSTRUCTION_PATH.joinpath("steps")
+    path.mkdir(exist_ok=True)
+    np.save(path.joinpath(f"rpc_{step}.npy"), u_recon)
     
     # Create PC dataframe.
     u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int))
-    return u_recon, s[eofs], v.iloc[:, eofs]
+    return u_recon, s[eof_list], v.iloc[:, eof_list]
 
 
-def pc_selection(step):
-    # Load hard-coded PC selection.
-    path = CONFIG_PATH.joinpath("instrumental", f"eoflist{step}.csv")
-    with open(path, "r", newline="") as f:
-        reader = csv.reader(f)
-        eofs = next(reader)
-    eofs = [int(n) - 1 for n in eofs]
-    return eofs
+def reconstruction_steps():
+    return sorted(eof_dictionary())
+
+
+def eof_dictionary():
+    # Load hard-coded PC selections.
+    eof_dict = {}
+    with open(CONFIG_PATH.joinpath("eoflists.dat"), "r") as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            year, eofs = line.split(":")
+            eofs = eofs.rstrip()
+            eofs = eofs.split(",")
+            eofs = tuple(int(n)-1 for n in eofs)
+            eof_dict[int(year)] = eofs
+    return eof_dict
+
+
+def eof_selection(step):
+    # Return list of selected EOFs.
+    return list(eof_dictionary()[step])
 
 
 def analyze_regions(recon):
@@ -696,21 +700,21 @@ def analyze_regions(recon):
     
     # Save Northern Hemisphere reconstruction.
     step = recon.index[0]
-    step_path = RECONSTRUCTION_PATH.joinpath("steps")
-    step_path.mkdir(exist_ok=True)
-    np.savetxt(step_path.joinpath(f"nhem_dense_{step}.txt"),
+    path = RECONSTRUCTION_PATH.joinpath("steps")
+    path.mkdir(exist_ok=True)
+    np.savetxt(path.joinpath(f"nhem_dense_{step}.txt"),
                series_to_array(dense_nhem_recon),
                header="Year   Temperature", fmt="%4d %11.7f", comments="")
-    np.savetxt(step_path.joinpath(f"nhem_sparse_{step}.txt"),
+    np.savetxt(path.joinpath(f"nhem_sparse_{step}.txt"),
                series_to_array(sparse_nhem_recon),
                header="Year   Temperature", fmt="%4d %11.7f", comments="")
     
     # Save calibration RE statistics.
-    step_path = VALIDATION_PATH.joinpath("steps")
-    step_path.mkdir(exist_ok=True)
+    path = VALIDATION_PATH.joinpath("steps")
+    path.mkdir(exist_ok=True)
     header = ["GLB", "NH", "DET", "NIN", "MLT"]
     data = [glob_cal_re, nhem_cal_re, detr_cal_re, nino_cal_re, mult_cal_re]
-    with open(step_path.joinpath(f"cal_re_{step}.csv"), "w") as f:
+    with open(path.joinpath(f"cal_re_{step}.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
@@ -718,7 +722,7 @@ def analyze_regions(recon):
     # Save verification RE statistics.
     header = ["GLB", "NH", "MLTA"]
     data = [glob_ver_re, nhem_ver_re, mult_ver_re]
-    with open(step_path.joinpath(f"ver_re_{step}.csv"), "w") as f:
+    with open(path.joinpath(f"ver_re_{step}.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
@@ -764,7 +768,7 @@ def re_statistic(recon, target, period):
         raise ValueError("Invalid period.")
     recon = recon.loc[start_year:end_year].to_numpy()
     target = target.loc[start_year:end_year].to_numpy()
-    res = recon - target
+    res = target - recon
     ssq_res = np.sum(res**2)
     ssq_target = np.sum(target**2)
     return 1 - ssq_res/ssq_target
@@ -779,7 +783,7 @@ def mult_re_statistic(recon, target, period):
         raise ValueError("Invalid period.")
     recon = recon.loc[start_year:end_year].to_numpy()
     target = target.loc[start_year:end_year].to_numpy()
-    res = recon - target
+    res = target - recon
     ssq_res = np.cumsum(res**2, axis=0).sum() # Incorrectly calculated.
     ssq_target = np.cumsum(target**2, axis=0).sum() # Ditto.
     return 1 - ssq_res/ssq_target
@@ -793,8 +797,8 @@ def summarize_results():
 
 
 def splice_nhem_reconstructions():
-    steps = sorted(reconstruction_steps())
-    years = np.arange(steps[0], CAL_END + 1)
+    steps = reconstruction_steps()
+    years = np.arange(steps[0], CAL_END+1)
     recon = np.empty((years.size, 2))
     recon[:, 0] = years
     for step in steps:
@@ -808,18 +812,18 @@ def splice_nhem_reconstructions():
 
 
 def splice_pc_reconstructions():
-    steps = sorted(reconstruction_steps())
-    years = np.arange(steps[0], CAL_END + 1)
+    steps = reconstruction_steps()
+    years = np.arange(steps[0], CAL_END+1)
     for i in range(5):
         recon = np.full((years.size, 2), np.nan)
         recon[:, 0] = years
         for step in steps:
-            eofs = pc_selection(step)
-            if i in eofs:
+            eof_list = eof_selection(step)
+            if i in eof_list:
                 path = RECONSTRUCTION_PATH.joinpath("steps", f"rpc_{step}.npy")
                 recon_step = np.load(path)
                 index = years >= step
-                recon[index, 1] = recon_step[:, eofs.index(i)]
+                recon[index, 1] = recon_step[:, eof_list.index(i)]
         recon = recon[~np.isnan(recon[:, 1]), :]
         path = RECONSTRUCTION_PATH.joinpath(f"rpc{i+1:02d}.txt")
         np.savetxt(path, recon, header=f"Year   PC#{i+1}", fmt="%4d %12.8f",
@@ -832,7 +836,7 @@ def make_re_table():
         f.write("       Calibration                    Verification\n")
         f.write("Step   GLB   NH    DET   NIN   MLT    GLB   NH    MLTA\n")
         f.write("------------------------------------------------------\n")
-        for step in reversed(sorted(reconstruction_steps())):
+        for step in reversed(reconstruction_steps()):
             line = f"{step:4d}"
             # Calibration RE.
             path = VALIDATION_PATH.joinpath("steps", f"cal_re_{step}.csv")
