@@ -4,15 +4,15 @@ MBH98emu is an accurate emulation of the iconic and much-debated Mann, Bradley &
 
 ## Status
 
-In testing, the Northern Hemisphere temperature reconstruction (the "hockey stick") has small errors in the last (seventh) decimal place. Reconstructed temperature principal components also have small errors in the last (eighth) decimal place.
+In testing, the emulation of the Northern Hemisphere temperature reconstruction (the "hockey stick") is within a millionth of a degree of the original. The "old" version of the reconstruction, shown in Figure 7 of MBH98, is reproduced exactly (the archived data has been rounded to four decimal places). The accuracy might differ between computers since the calculations involve a lot of single-precision floating-point arithmetic. Regardless, this emulation should be much more accurate than those found in the literature. Reasons for this include corrections to the proxy networks and differences in how the proxy data is processed.
 
-This accuracy depends on IEEE-754 compliance and may not apply to all systems. The emulation should still be orders of magnitude more accurate than emulations found in the literature, for various reasons.
-
-The scope of MBH98emu does not include principal component selection rules, as the exact rules used in MBH98 are not known. Selections from MBH98 are hard-coded in `mbh98emu/config/`. This was handled similarly in published emulations.
+Principal component selection rules are outside the scope of this project, as the exact rules used in MBH98 are not known. Selections from MBH98 are hard-coded in `mbh98emu/config/`. This was handled similarly in published emulations.
 
 ## Usage
 
 Download the MBH98emu repository and run the Python script `mbh98emu/script/mbh98emu.py`. The results are saved in `mbh98emu/reconstruction/` and `mbh98emu/validation/`. Some intermediate results are saved in other directories.
+
+Corresponding files for the "old" version are located in `mbh98emu/old/`.
 
 A run may take around 10 minutes. Use the `--fast` flag for faster but less accurate emulation.
 

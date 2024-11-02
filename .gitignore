@@ -4,4 +4,7 @@ mbh98emu/instrumental/
 mbh98emu/proxy/
 mbh98emu/reconstruction/
 mbh98emu/validation/
+mbh98emu/old/proxy/
+mbh98emu/old/reconstruction/
+mbh98emu/old/validation/
 __pycache__/
