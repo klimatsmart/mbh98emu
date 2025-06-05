@@ -496,7 +496,8 @@ def proxy_matrix(datalist_path):
     # Return a proxy data matrix with year in the first column.
     mbh98_path = DOWNLOAD_PATH.joinpath("mbh98")
     with open(datalist_path, "r") as f:
-        relative_paths = f.read().splitlines()
+        lines = f.read().splitlines()
+    relative_paths = [line for line in lines if not line.startswith("#")]
     step = int(datalist_path.stem.strip("datalist"))
     n = CAL_END - step + 1
     m = len(relative_paths)
@@ -644,7 +645,7 @@ def reconstruction_steps():
 
 
 def eof_dictionary():
-    # Load hard-coded PC selections.
+    # Read EOF selections from config file.
     eof_dict = {}
     with open(CONFIG_PATH.joinpath("eoflists.dat"), "r") as f:
         for line in f:

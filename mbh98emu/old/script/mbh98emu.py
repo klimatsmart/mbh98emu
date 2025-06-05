@@ -500,6 +500,7 @@ def proxy_matrix():
     mbh98_path = DOWNLOAD_PATH.joinpath("mbh98")
     with open(datalist_path, "r") as f:
         lines = f.read().splitlines()
+    lines = [line for line in lines if not line.startswith("#")]
     n = PROXY_END - PROXY_START + 1
     m = len(lines)
     p = np.full((n, m+1), np.nan)
@@ -671,7 +672,7 @@ def eof_lists():
 
 
 def eof_dictionary():
-    # Load hard-coded PC selections.
+    # Read EOF selections from config file.
     eof_dict = {}
     with open(CONFIG_PATH.joinpath("eoflists.dat"), "r") as f:
         for line in f:
