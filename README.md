@@ -8,7 +8,7 @@ In testing, the emulation of the Northern Hemisphere temperature reconstruction 
 
 An "old" version of the reconstruction, shown in Figure 7 of MBH98, is emulated as well. The archived reconstruction is only given to four decimal places and is reproduced exactly.
 
-As this project demonstrates, MBH98 used several tree-ring principal components the authors have claimed were excluded according to objective selection criteria. It is unclear if they were retained by mistake or if some undisclosed rule was applied. The emulation skips that part of the algorithm and reads the PC selections from configuration files instead.
+As this project demonstrates, MBH98 used several tree-ring principal components that the authors have claimed were excluded based on objective selection criteria. It is unclear if they were retained by mistake or if some undisclosed rule was applied. The emulation skips that part of the algorithm and reads PC selections from configuration files instead.
 
 ## Usage
 
@@ -33,7 +33,7 @@ The instrumental data is available from PSU and NOAA:
 
 ### Proxy data
 
-The PSU and NOAA archives also contain proxy data, but this dataset was prepared after MBH98 was published and is missing several records the authors mistakenly believed they had not used.
+The PSU and NOAA archives also contain a set of proxy data matrices, but this dataset was prepared for a corrigendum and is missing several records the authors mistakenly believed they had not used.
 
 Luckily, a copy of the original MBH98 proxy data was circulated online following a data breach at the Climatic Research Unit in 2009. The file is available here:
 
