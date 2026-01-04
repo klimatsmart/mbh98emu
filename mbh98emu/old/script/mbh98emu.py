@@ -576,11 +576,10 @@ def submatrix(x, t0, t1):
 def reconstruct_temperature():
     print("Generating reconstruction...")
     for eof_list in eof_lists():
-        recon = reconstructed_temperature_field(eof_list)
-        analyze_regions(recon, eof_list)
+        reconstruct_temperature_field(eof_list)
 
 
-def reconstructed_temperature_field(eof_list):
+def reconstruct_temperature_field(eof_list):
     u_recon, s, v = reconstructed_svd(eof_list)
     
     # Undo weighting and scaling.
@@ -591,7 +590,12 @@ def reconstructed_temperature_field(eof_list):
     recon_zscores = recon_weighted / w
     recon = recon_zscores * sigma
     recon = pd.DataFrame(data=recon, index=u_recon.index, columns=v.index)
-    return recon
+    
+    # Save reconstructed temperature field.
+    dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_list)
+    path = RECONSTRUCTION_PATH.joinpath(dirname)
+    path.mkdir(exist_ok=True)
+    recon.to_pickle(path.joinpath("grid.pkl"))
 
 
 def reconstructed_svd(eof_list):
@@ -649,7 +653,7 @@ def reconstructed_svd(eof_list):
     dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_list)
     path = RECONSTRUCTION_PATH.joinpath(dirname)
     path.mkdir(exist_ok=True)
-    np.save(path.joinpath(f"rpc.npy"), u_recon)
+    np.save(path.joinpath("rpc.npy"), u_recon)
     
     # Create PC dataframe.
     u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int))
@@ -667,14 +671,14 @@ def reconstruction_steps():
 
 
 def eof_lists():
-    eof_tuples = set(eof_dictionary().values())
+    eof_tuples = set(eof_dictionary_for_reconstructions().values())
     return [list(eof_tuple) for eof_tuple in eof_tuples]
 
 
-def eof_dictionary():
+def eof_dictionary_for_reconstructions():
     # Read EOF selections from config file.
     eof_dict = {}
-    with open(CONFIG_PATH.joinpath("eoflists.dat"), "r") as f:
+    with open(CONFIG_PATH.joinpath("eofs_for_reconstructions.dat"), "r") as f:
         for line in f:
             if line.startswith("#"):
                 continue
@@ -682,11 +686,17 @@ def eof_dictionary():
             eofs = eofs.rstrip()
             eofs = eofs.split(",")
             eofs = tuple(int(n)-1 for n in eofs)
-            eof_dict[int(year)] = eofs
+            eof_dict[year] = eofs
     return eof_dict
 
 
-def analyze_regions(recon, eof_list):
+def cross_validate():
+    print("Performing cross-validation...")
+    for eof_list in eof_lists():
+        analyze_reconstruction(eof_list)
+
+
+def analyze_reconstruction(eof_list):
     # Load instrumental data.
     dense_path = INSTRUMENTAL_PATH.joinpath("dense_subset_centered.pkl")
     sparse_path = INSTRUMENTAL_PATH.joinpath("sparse_subset_centered.pkl")
@@ -701,13 +711,17 @@ def analyze_regions(recon, eof_list):
     sparse_glob_instr = regional_mean(sparse_instr, "glob")
     sparse_nhem_instr = regional_mean(sparse_instr, "nhem")
     
+    # Load reconstruction.
+    dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_list)
+    path = RECONSTRUCTION_PATH.joinpath(dirname, "grid.pkl")
+    dense_recon = pd.read_pickle(path)
+    sparse_recon = dense_recon.loc[:, sparse_instr.columns]
+    
     # Reconstructed means.
-    dense_recon = recon
     dense_glob_recon = regional_mean(dense_recon, "glob")
     dense_nhem_recon = regional_mean(dense_recon, "nhem")
     dense_detr_recon = detrend_series(dense_nhem_recon.loc[CAL_START:CAL_END])
     dense_nino_recon = regional_mean(dense_recon, "nino")
-    sparse_recon = recon.loc[:, sparse_instr.columns]
     sparse_glob_recon = regional_mean(sparse_recon, "glob")
     sparse_nhem_recon = regional_mean(sparse_recon, "nhem")
     
@@ -717,18 +731,24 @@ def analyze_regions(recon, eof_list):
     detr_cal_re = re_statistic(dense_detr_recon, dense_detr_instr, "cal")
     nino_cal_re = re_statistic(dense_nino_recon, dense_nino_instr, "cal")
     mult_cal_re = mult_re_statistic(dense_recon, dense_instr, "cal")
+    grid_cal_re = gridbox_re_statistic(dense_recon, dense_instr, "cal")
     glob_ver_re = re_statistic(sparse_glob_recon, sparse_glob_instr, "ver")
     nhem_ver_re = re_statistic(sparse_nhem_recon, sparse_nhem_instr, "ver")
     mult_ver_re = mult_re_statistic(sparse_recon, sparse_instr, "ver")
+    grid_ver_re = gridbox_re_statistic(sparse_recon, sparse_instr, "ver")
+    
+    # Correlation statistics.
+    grid_cal_r = gridbox_r_statistic(dense_recon, dense_instr, "cal")
+    grid_ver_r = gridbox_r_statistic(sparse_recon, sparse_instr, "ver")
     
     # Save Northern Hemisphere reconstruction.
     dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_list)
     path = RECONSTRUCTION_PATH.joinpath(dirname)
     path.mkdir(exist_ok=True)
-    np.savetxt(path.joinpath(f"nhem_dense.txt"),
+    np.savetxt(path.joinpath("nhem_dense.txt"),
                series_to_array(dense_nhem_recon),
                header="Year   Temperature", fmt="%4d %8.4f", comments="")
-    np.savetxt(path.joinpath(f"nhem_sparse.txt"),
+    np.savetxt(path.joinpath("nhem_sparse.txt"),
                series_to_array(sparse_nhem_recon),
                header="Year   Temperature", fmt="%4d %8.4f", comments="")
     
@@ -737,18 +757,24 @@ def analyze_regions(recon, eof_list):
     path.mkdir(exist_ok=True)
     header = ["GLB", "NH", "DET", "NIN", "MLT"]
     data = [glob_cal_re, nhem_cal_re, detr_cal_re, nino_cal_re, mult_cal_re]
-    with open(path.joinpath(f"cal_re.csv"), "w") as f:
+    with open(path.joinpath("cal_re.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
+    grid_cal_re.to_pickle(path.joinpath("gridbox_cal_re.pkl"))
     
     # Save verification RE statistics.
     header = ["GLB", "NH", "MLTA"]
     data = [glob_ver_re, nhem_ver_re, mult_ver_re]
-    with open(path.joinpath(f"ver_re.csv"), "w") as f:
+    with open(path.joinpath("ver_re.csv"), "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerow(data)
+    grid_ver_re.to_pickle(path.joinpath("gridbox_ver_re.pkl"))
+    
+    # Save r statistics.
+    grid_cal_r.to_pickle(path.joinpath("gridbox_cal_r.pkl"))
+    grid_ver_r.to_pickle(path.joinpath("gridbox_ver_r.pkl"))
 
 
 def series_to_array(s):
@@ -812,20 +838,55 @@ def mult_re_statistic(recon, target, period):
     return 1 - ssq_res/ssq_target
 
 
+def gridbox_re_statistic(recon, target, period):
+    if period == "cal":
+        start_year, end_year = CAL_START, CAL_END
+    elif period == "ver":
+        start_year, end_year = VER_START, VER_END
+    else:
+        raise ValueError("Invalid period.")
+    index = recon.columns
+    recon = recon.loc[start_year:end_year].to_numpy()
+    target = target.loc[start_year:end_year].to_numpy()
+    res = target - recon
+    ssq_res = np.sum(res**2, axis=0)
+    ssq_target = np.sum(target**2, axis=0)
+    return pd.Series(data=1-ssq_res/ssq_target, index=index)
+
+
+def gridbox_r_statistic(recon, target, period):
+    # Educated guess.
+    if period == "cal":
+        start_year, end_year = CAL_START, CAL_END
+    elif period == "ver":
+        start_year, end_year = VER_START, VER_END
+    else:
+        raise ValueError("Invalid period.")
+    index = recon.columns
+    recon = recon.loc[start_year:end_year].to_numpy()
+    target = target.loc[start_year:end_year].to_numpy()
+    n = end_year - start_year + 1
+    cov_xy = np.sum(recon*target, axis=0) / n
+    var_x = np.sum(recon**2, axis=0) / n
+    var_y = np.sum(target**2, axis=0) / (CAL_END-CAL_START+1)
+    r = cov_xy / np.sqrt(var_x*var_y)
+    return pd.Series(data=r, index=index)
+
+
 def summarize_results():
     print("Summarizing results...")
     splice_nhem_reconstructions()
 
 
 def splice_nhem_reconstructions():
-    eof_dict = eof_dictionary()
-    steps = sorted(eof_dict)
+    eof_dict = eof_dictionary_for_reconstructions()
+    steps = sorted([int(step) for step in eof_dict])
     years = np.arange(steps[0], CAL_END+1)
     recon = np.empty((years.size, 2))
     recon[:, 0] = years
     for step in steps:
-        dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_dict[step])
-        path = RECONSTRUCTION_PATH.joinpath(dirname, f"nhem_dense.txt")
+        dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_dict[str(step)])
+        path = RECONSTRUCTION_PATH.joinpath(dirname, "nhem_dense.txt")
         recon_step = np.genfromtxt(path, skip_header=1)
         recon[recon[:, 0] >= step, 1] = recon_step[recon_step[:, 0] >= step, 1]
     path = RECONSTRUCTION_PATH.joinpath("nhem_reconstruction.txt")
@@ -839,6 +900,7 @@ def main():
     prepare_instrumental_data()
     prepare_proxy_data()
     reconstruct_temperature()
+    cross_validate()
     summarize_results()
 
 
