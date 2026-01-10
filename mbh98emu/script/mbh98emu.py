@@ -14,7 +14,7 @@ import pandas as pd
 
 import svdalg
 
-# Prepare directories.
+# Directories.
 ROOT_PATH = pathlib.Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT_PATH.joinpath("config")
 DOWNLOAD_PATH = ROOT_PATH.joinpath("downloads")
@@ -22,12 +22,6 @@ INSTRUMENTAL_PATH = ROOT_PATH.joinpath("instrumental")
 PROXY_PATH = ROOT_PATH.joinpath("proxy")
 RECONSTRUCTION_PATH = ROOT_PATH.joinpath("reconstruction")
 VALIDATION_PATH = ROOT_PATH.joinpath("validation")
-for path in [RECONSTRUCTION_PATH, VALIDATION_PATH]:
-    if path.is_dir():
-        shutil.rmtree(path)
-for path in [DOWNLOAD_PATH, INSTRUMENTAL_PATH, PROXY_PATH,
-             RECONSTRUCTION_PATH, VALIDATION_PATH]:
-    path.mkdir(exist_ok=True)
 
 # Instrumental, calibration and verification periods.
 INSTR_START = 1854
@@ -73,6 +67,21 @@ def lstsq(a, b, fast=False):
     return x
 
 
+def make_directory(path):
+    path.mkdir(exist_ok=True)
+
+
+def remove_directory(path):
+    if path.is_dir():
+        shutil.rmtree(path)
+
+
+def get_data():
+    make_directory(DOWNLOAD_PATH)
+    get_instrumental_data()
+    get_proxy_data()
+
+
 def get_instrumental_data():
     url = "https://www.meteo.psu.edu/holocene/public_html/shared/research/MANNETAL98/INSTRUMENTAL/anomalies-new"
     path = DOWNLOAD_PATH.joinpath("anomalies-new")
@@ -99,6 +108,7 @@ def get_data_from_url(url, path):
 
 def prepare_instrumental_data():
     print("Preparing instrumental data...")
+    make_directory(INSTRUMENTAL_PATH)
     create_instrumental_dataframe()
     prepare_dense_subset()
     prepare_sparse_subset()
@@ -470,6 +480,7 @@ def process_instrumental_svd():
 
 def prepare_proxy_data():
     print("Preparing proxy data...")
+    make_directory(PROXY_PATH)
     extract_proxy_archive()
     create_proxy_matrices()
 
@@ -566,6 +577,8 @@ def submatrix(x, t0, t1):
 
 def reconstruct_temperature():
     print("Generating reconstruction...")
+    remove_directory(RECONSTRUCTION_PATH)
+    make_directory(RECONSTRUCTION_PATH)
     for step in reconstruction_steps():
         reconstruct_temperature_field(step)
 
@@ -669,6 +682,8 @@ def eof_selection_for_reconstruction(step):
 
 def cross_validate():
     print("Performing cross-validation...")
+    remove_directory(VALIDATION_PATH)
+    make_directory(VALIDATION_PATH)
     for step in reconstruction_steps():
         analyze_reconstruction(step)
     establish_benchmarks()
@@ -1019,8 +1034,7 @@ def make_re_tables():
 
 
 def main():
-    get_instrumental_data()
-    get_proxy_data()
+    get_data()
     prepare_instrumental_data()
     prepare_proxy_data()
     reconstruct_temperature()
