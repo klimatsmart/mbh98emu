@@ -114,6 +114,7 @@ def prepare_instrumental_data():
     prepare_sparse_subset()
     compute_gridbox_statistics()
     center_annual_means()
+    compute_hemispheric_mean()
     compute_instrumental_svd()
     process_instrumental_svd()
 
@@ -274,14 +275,17 @@ def div32(a, b):
 def array_sum32(a):
     s = np.float32(0)
     for element in a:
-        s = add32(s, element)
+        s = np.float32(s+element)
     return s
 
 
-def column_mean32(a):
+def column_mean32(a, promote_to_double=False):
     s = np.zeros(a.shape[1], dtype=np.float32)
     for row in a:
-        s = add32(s, row)
+        if promote_to_double:
+            s = np.float32(s+row)
+        else:
+            s = add32(s, row)
     mu = div32(s, a.shape[0])
     return mu
 
@@ -322,13 +326,13 @@ def round_to_2_decimal_places(df):
     t[:] = t.round(2)
 
 
-def annual_means(df):
+def annual_means(df, promote_to_double=False):
     years = sorted(set(df.index.year))
     df_annual = pd.DataFrame(index=years, columns=df.columns,
                              dtype=np.float64)
     for year in years:
         t = df.loc[df.index.year == year].to_numpy()
-        df_annual.loc[year, :] = column_mean32(t)
+        df_annual.loc[year, :] = column_mean32(t, promote_to_double)
     return df_annual
 
 
@@ -378,13 +382,33 @@ def center_annual_means():
     df_sparse -= mu[df_sparse.columns] # Not properly centered.
     
     # Annual means for dense subset.
-    df_dense = df_dense_monthly.groupby(df_dense_monthly.index.year).mean()
+    df_dense = annual_means(df_dense_monthly, promote_to_double=True)
     
     # Save centered data.
     dense_path = INSTRUMENTAL_PATH.joinpath("dense_subset_centered.pkl")
     sparse_path = INSTRUMENTAL_PATH.joinpath("sparse_subset_centered.pkl")
     df_dense.to_pickle(dense_path)
     df_sparse.to_pickle(sparse_path)
+
+
+def compute_hemispheric_mean():
+    # Load instrumental data.
+    dense_path = INSTRUMENTAL_PATH.joinpath("dense_subset_centered.pkl")
+    sparse_path = INSTRUMENTAL_PATH.joinpath("sparse_subset_centered.pkl")
+    df_dense = pd.read_pickle(dense_path)
+    df_sparse = pd.read_pickle(sparse_path)
+    
+    # Compute hemispheric mean.
+    df_dense_nhem = regional_mean(df_dense, "nhem")
+    df_sparse_nhem = regional_mean(df_sparse, "nhem")
+    
+    # Save results.
+    np.savetxt(INSTRUMENTAL_PATH.joinpath("nhem_dense.txt"),
+               series_to_array(df_dense_nhem),
+               header="Year   Temperature", fmt="%4d %11.7f", comments="")
+    np.savetxt(INSTRUMENTAL_PATH.joinpath("nhem_sparse.txt"),
+               series_to_array(df_sparse_nhem),
+               header="Year   Temperature", fmt="%4d %21.13e", comments="")
 
 
 def compute_instrumental_svd():
