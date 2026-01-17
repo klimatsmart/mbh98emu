@@ -686,14 +686,13 @@ def reconstructed_svd(eof_list):
     sigma_instr = np.sqrt(sigma_instr / cal_length)
     u_recon = u_recon * sigma_instr / sigma_recon
     
-    # Save reconstructed singular vectors.
+    # Save PC dataframe.
     dirname = "eofs_" + "_".join(str(eof+1) for eof in eof_list)
     path = RECONSTRUCTION_PATH.joinpath(dirname)
     path.mkdir(exist_ok=True)
-    np.save(path.joinpath("rpc.npy"), u_recon)
-    
-    # Create PC dataframe.
-    u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int))
+    u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int),
+                           columns=eof_list)
+    u_recon.to_pickle(path.joinpath("rpc.pkl"))
     return u_recon, s[eof_list], v.iloc[:, eof_list]
 
 

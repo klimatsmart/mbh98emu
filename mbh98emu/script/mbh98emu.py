@@ -670,13 +670,12 @@ def reconstructed_svd(step):
     sigma_instr = np.sqrt(sigma_instr / cal_length)
     u_recon = u_recon * sigma_instr / sigma_recon
     
-    # Save reconstructed singular vectors.
+    # Save PC dataframe.
     path = RECONSTRUCTION_PATH.joinpath("steps")
     path.mkdir(exist_ok=True)
-    np.save(path.joinpath(f"rpc_{step}.npy"), u_recon)
-    
-    # Create PC dataframe.
-    u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int))
+    u_recon = pd.DataFrame(data=u_recon, index=p[:, 0].astype(int),
+                           columns=eof_list)
+    u_recon.to_pickle(path.joinpath(f"rpc_{step}.pkl"))
     return u_recon, s[eof_list], v.iloc[:, eof_list]
 
 
@@ -1006,10 +1005,10 @@ def splice_pc_reconstructions():
         for step in steps:
             eof_list = eof_selection_for_reconstruction(str(step))
             if i in eof_list:
-                path = RECONSTRUCTION_PATH.joinpath("steps", f"rpc_{step}.npy")
-                recon_step = np.load(path)
+                path = RECONSTRUCTION_PATH.joinpath("steps", f"rpc_{step}.pkl")
+                recon_step = pd.read_pickle(path)
                 index = years >= step
-                recon[index, 1] = recon_step[:, eof_list.index(i)]
+                recon[index, 1] = recon_step.loc[:, i].to_numpy()
         recon = recon[~np.isnan(recon[:, 1]), :]
         path = RECONSTRUCTION_PATH.joinpath(f"rpc{i+1:02d}.txt")
         np.savetxt(path, recon, header=f"Year   PC#{i+1}", fmt="%4d %12.8f",
