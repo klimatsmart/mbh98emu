@@ -1,10 +1,9 @@
-# Generated files
 mbh98emu/downloads/
 mbh98emu/instrumental/
 mbh98emu/proxy/
-mbh98emu/reconstruction/
+mbh98emu/reconstruction/**
+!mbh98emu/reconstruction/**/
+!mbh98emu/reconstruction/**/nhem_dense.txt
+!mbh98emu/reconstruction/**/nhem_sparse.txt
 mbh98emu/validation/
-mbh98emu/old/proxy/
-mbh98emu/old/reconstruction/
-mbh98emu/old/validation/
 __pycache__/

@@ -6,7 +6,7 @@ MBH98emu recreates the iconic "hockey stick" temperature reconstruction presente
 
 Run the Python script `mbh98emu/script/mbh98emu.py` to emulate the main MBH98 reconstruction. The results are saved to `mbh98emu/reconstruction/` and `mbh98emu/validation/`.
 
-Corresponding files for an "old" version of the reconstruction (MBH98, Figure&nbsp;7) are located in `mbh98emu/old/`.
+Use the `--old` flag to emulate the "old" version of the reconstruction (MBH98, Figure&nbsp;7).
 
 A run may take around 10 minutes. The `--fast` flag speeds up execution at the cost of numerical accuracy.
 
@@ -18,9 +18,9 @@ To match the published results, several errors in MBH98 are intentionally preser
 
 - **Short-centered PCA:** Tree-ring data was incorrectly centered on the calibration mean prior to PCA ([McIntyre and McKitrick,&nbsp;2005](https://doi.org/10.1029/2004GL021750)). The original archived PCs are used here for simplicity.
 
-- **Ghost step:** Neither the original paper nor the corrigendum mentions a reconstruction step spanning 1650–1699. The proxy network is listed in `mbh98emu/config/datalist1650.dat`.
+- **Ghost step:** Neither the original paper nor the corrigendum mentions a reconstruction step spanning 1650–1699. The proxy network is listed in `mbh98emu/config/main/datalist1650.dat`.
 
-- **Inconsistent proxy weighting:** The corrigendum describes a weighting procedure to address proxy redundancy; however, this setting was not enabled in the final analysis (`multiproxy.f`, lines&nbsp;242, 312–316). Reverse-engineered weights for the "old" reconstruction are included in `mbh98emu/old/config/datalist.dat`.
+- **Inconsistent proxy weighting:** The corrigendum describes a weighting procedure to address proxy redundancy; however, this setting was not enabled in the final analysis (`multiproxy.f`, lines&nbsp;242, 312–316). Reverse-engineered weights for the "old" reconstruction are included in `mbh98emu/config/old/datalist.dat`.
 
 - **Incorrect area weighting:** Grid-point temperatures were weighted by the cosine of latitude prior to PCA. To achieve the intended area-proportional variance, the square root of the cosine should have been used ([von Storch *et al.*,&nbsp;2004](https://doi.org/10.1126/science.1096109)).
 
@@ -28,7 +28,7 @@ To match the published results, several errors in MBH98 are intentionally preser
 
 - **Flawed reduction of error:** The multivariate spatiotemporal RE calculation involved incorrectly placed code (`multiproxy.f`, lines&nbsp;1543–1544, 1642–1643, 2028–2029) and a lack of area weighting, resulting in inflated verification scores across all reconstruction steps.
 
-- **Flawed correlations:** The verification $r^2$ map (MBH98, Figure&nbsp;3) is consistent with the combined effect of two undisclosed mistakes in the correlation calculation: centering on the calibration mean and mixing the lengths of the calibration and verification periods. These errors yield $r^2$ values as high as 1.45. While the source code appears to have been patched (`multiproxy.f`, lines&nbsp;2065–2090), the published figure remains uncorrected.
+- **Flawed correlations:** The verification $r^2$ map (MBH98, Figure&nbsp;3) perfectly matches a calculation with data centered on the calibration mean and grid cells colored based on critical values for a sample size of 80, rather than the values indicated in the legend. For context, the verification and calibration periods are 48 and 79 years, respectively. While the source code appears to have been patched (`multiproxy.f`, lines&nbsp;2065–2090), the published figure remains uncorrected.
 
 ## Data sources
 
@@ -45,7 +45,7 @@ Available from PSU or NOAA as part of the corrigendum dataset:
 
 ### Proxy data
 
-The original proxy dataset was released as `mbh98.tar` in the 2009 Climatic Research Unit data breach. It is available via these mirrors (as of June 2026):
+The original proxy dataset was released as `mbh98.tar` in the 2009 Climatic Research Unit data breach. It is available via these mirrors (as of July 2026):
 
 - <https://sealevel.info/FOIA/2009/FOIA/documents/mbh98-osborn/mbh98.tar>
 - <http://junksciencearchive.com/FOIA/documents/mbh98-osborn/mbh98.tar>
