@@ -221,7 +221,7 @@ def prepare_sparse_subset():
 
 
 def fill_in_instrumental_data(df):
-    t = df.to_numpy()
+    t = df.to_numpy(copy=True)
     n = t.shape[0]
     for i in range(t.shape[1]):
         # Indices with data.
@@ -241,6 +241,7 @@ def fill_in_instrumental_data(df):
         elif j[-1] == n - 2:
             # Special rule when only the last value is missing.
             t[-1, i] = div32(add32(t[-3, i], t[-2, i]), 2)
+    df[:] = t
 
 
 def interpolate32(t):
@@ -314,37 +315,37 @@ def linear_fit32(y, x0=0):
 
 
 def convert_to_degrees(df):
-    t = df.to_numpy()
+    t = df.to_numpy(copy=True)
     t[t == -9999] = np.nan
-    t /= 100
+    df[:] = t / 100
 
 
 def invert_anomalies_below_minus_10(df):
     # Emulate a programming error.
-    t = df.to_numpy()
+    t = df.to_numpy(copy=True)
     t[t <= -10] *= -1
+    df[:] = t
 
 
 def round_to_2_decimal_places(df):
-    t = df.to_numpy()
-    t[:] = t.round(2)
+    t = df.to_numpy(copy=True)
+    df[:] = t.round(2)
 
 
 def annual_means(df, promote_to_double=False):
     years = sorted(set(df.index.year))
-    df_annual = pd.DataFrame(index=years, columns=df.columns,
-                             dtype=np.float64)
-    for year in years:
+    mu = np.full((len(years), df.shape[1]), np.nan)
+    for i, year in enumerate(years):
         t = df.loc[df.index.year == year].to_numpy()
-        df_annual.loc[year, :] = column_mean32(t, promote_to_double)
-    return df_annual
+        mu[i, :] = column_mean32(t, promote_to_double)
+    return pd.DataFrame(data=mu, index=years, columns=df.columns)
 
 
 def compute_gridbox_statistics():
     # Load instrumental data.
     path = INSTRUMENTAL_PATH.joinpath("dense_subset_monthly.pkl")
     df = pd.read_pickle(path)
-    t = df.to_numpy()
+    t = df.to_numpy(copy=True)
     
     # Means.
     month_count = 12 * (CAL_END - CAL_START + 1)
@@ -452,7 +453,7 @@ def process_instrumental_svd():
     
     # Standardize annual means of left singular vectors.
     u = annual_means(u_monthly_rounded)
-    data = u.to_numpy()
+    data = u.to_numpy(copy=True)
     mu = np.zeros(data.shape[1])
     cal_length = np.float32(CAL_END - CAL_START + 1)
     for i in range(int(cal_length)):
@@ -468,6 +469,7 @@ def process_instrumental_svd():
         sigma += detrended**2
     sigma = np.sqrt(sigma / cal_length)
     data /= sigma
+    u[:] = data
     
     # Save standardized singular vectors and statistics.
     u.to_pickle(svd_path.joinpath("u_zscores.pkl"))
@@ -504,7 +506,10 @@ def extract_proxy_archive():
 def untar(tar_path, untar_path):
     if not untar_path.is_dir():
         with tarfile.TarFile(tar_path, "r") as f:
-            f.extractall(untar_path)
+            try:
+                f.extractall(untar_path, filter="data")
+            except TypeError:
+                f.extractall(untar_path)
 
 
 def create_proxy_matrices():
@@ -646,7 +651,7 @@ def reconstruct_temperature_field(step):
     sigma = np.load(INSTRUMENTAL_PATH.joinpath("sigma.npy"))
     lat = np.array(v.index.get_level_values("lat"))
     w = np.cos(lat*PI/180)
-    recon_weighted = (u_recon.to_numpy() * s) @ v.to_numpy().T
+    recon_weighted = (u_recon.to_numpy() * s) @ v.to_numpy(dtype=np.float32).T
     recon_zscores = recon_weighted / w
     recon = recon_zscores * sigma
     recon = pd.DataFrame(data=recon, index=u_recon.index, columns=v.index)
@@ -665,7 +670,7 @@ def reconstruct_old_temperature_field(eof_list):
     sigma = np.load(INSTRUMENTAL_PATH.joinpath("sigma.npy"))
     lat = np.array(v.index.get_level_values("lat"))
     w = np.cos(lat*PI/180)
-    recon_weighted = (u_recon.to_numpy() * s) @ v.to_numpy().T
+    recon_weighted = (u_recon.to_numpy() * s) @ v.to_numpy(dtype=np.float32).T
     recon_zscores = recon_weighted / w
     recon = recon_zscores * sigma
     recon = pd.DataFrame(data=recon, index=u_recon.index, columns=v.index)
@@ -689,6 +694,7 @@ def reconstructed_svd(step):
     
     # Load instrumental EOF selection.
     eof_list = eof_selection_for_reconstruction(step)
+    n_eofs = len(eof_list)
     
     # Load instrumental svd.
     svd_path = INSTRUMENTAL_PATH.joinpath("svd")
@@ -708,7 +714,7 @@ def reconstructed_svd(step):
     
     # Reconstruct PCs.
     u_weighted_recon = lstsq(g.T, p[:, 1:].T, fast=FAST).T
-    u_recon = u_weighted_recon * sigma[eof_list] / w[eof_list] + mu[eof_list]
+    u_recon = u_weighted_recon * sigma[:n_eofs] / w[:n_eofs] + mu[:n_eofs] # ?
     
     # Rescale PCs.
     sigma_recon = np.zeros(len(eof_list), dtype=np.float32)
@@ -739,6 +745,7 @@ def old_reconstructed_svd(eof_list):
     p[:, 1:] *= w
     p_cal = submatrix(p, CAL_START, CAL_END)
     index_cal = (p[:, 0] >= CAL_START) & (p[:, 0] <= CAL_END)
+    n_eofs = len(eof_list)
     
     # Load instrumental svd.
     svd_path = INSTRUMENTAL_PATH.joinpath("svd")
@@ -764,8 +771,8 @@ def old_reconstructed_svd(eof_list):
         g_step = g[:, ~np.isnan(p_step[0, 1:])]
         p_step = p_step[:, ~np.isnan(p_step[0, :])]
         u_weighted_recon = lstsq(g_step.T, p_step[:, 1:].T, fast=FAST).T
-        u_recon[index, :] = (u_weighted_recon * sigma[eof_list] / w[eof_list]
-                             + mu[eof_list])
+        u_recon[index, :] = (u_weighted_recon * sigma[:n_eofs] / w[:n_eofs]
+                             + mu[:n_eofs]) # ?
     
     # Rescale PCs.
     sigma_recon = np.zeros(len(eof_list), dtype=np.float32)
@@ -1017,7 +1024,7 @@ def series_to_array(s):
 
 def detrended_series(s):
     # Return a detrended pandas series.
-    data = s.to_numpy().copy()
+    data = s.to_numpy(copy=True)
     alpha, beta = linear_fit32(data[:, np.newaxis])
     data = data - beta*np.arange(1, data.size+1) - alpha
     return pd.Series(data=data, index=s.index)

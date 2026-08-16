@@ -156,8 +156,9 @@ def _diagonal_reduction(a, b, c):
                 y = np.float32(s[k-1])
                 g = np.float32(t[k-1])
                 h = np.float32(t[k])
-                f = np.float32(((y-w)*(y+w) + (g-h)*(g+h)) / (2*h*y))
-                g = np.sqrt(f*f + 1, dtype=np.float32)
+                f = np.float32(((y-w)*(y+w) + (g-h)*(g+h))
+                               / (np.float64(2)*h*y))
+                g = np.float32(np.sqrt(f*f + np.float64(1)))
                 if f < 0:
                     g = -g
                 f = np.float32(((x-w)*(x+w) + (y/(f+g)-h)*h) / x)
